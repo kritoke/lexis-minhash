@@ -1,0 +1,10 @@
+# Default Ameba configuration
+require:
+  - ameba
+
+format:
+  progress
+
+inherit_mode:
+  merge:
+    - Exclude
