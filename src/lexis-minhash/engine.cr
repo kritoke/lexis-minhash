@@ -70,7 +70,23 @@ module LexisMinhash
     end
 
     # Compute signature using rolling hash + multiply-shift
-    def self.compute_signature(text : String) : Slice(UInt32)
+    # Returns Array(UInt32) for backward compatibility
+    def self.compute_signature(text : String) : Array(UInt32)
+      num_hashes, _, _, shingle_size = config
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      roller = ShingleRoller.new(shingle_size)
+
+      text.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          update_signature(signature, h64)
+        end
+      end
+
+      signature.to_a
+    end
+
+    # Compute signature as Slice(UInt32) for performance-critical code
+    def self.compute_signature_slice(text : String) : Slice(UInt32)
       num_hashes, _, _, shingle_size = config
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
@@ -95,7 +111,19 @@ module LexisMinhash
       end
     end
 
-    # Compute similarity between two signatures
+    # Compute similarity between two signatures (Array or Slice)
+    def self.similarity(sig1 : Array(UInt32), sig2 : Array(UInt32)) : Float64
+      return 0.0_f64 if sig1.empty? || sig2.empty?
+      return 0.0_f64 if sig1.size != sig2.size
+
+      matches = 0
+      sig1.size.times do |i|
+        matches += 1 if sig1[i] == sig2[i]
+      end
+
+      matches.to_f64 / sig1.size.to_f64
+    end
+
     def self.similarity(sig1 : Slice(UInt32), sig2 : Slice(UInt32)) : Float64
       return 0.0_f64 if sig1.empty? || sig2.empty?
       return 0.0_f64 if sig1.size != sig2.size
@@ -108,8 +136,22 @@ module LexisMinhash
       matches.to_f64 / sig1.size.to_f64
     end
 
-    # Generate LSH bands from signature
+    # Generate LSH bands from signature (Array or Slice)
     # Returns Array({Int32, UInt64}) with {band_index, band_hash} tuples
+    def self.generate_bands(signature : Array(UInt32)) : Array({Int32, UInt64})
+      _, bands, rows, _ = config
+      band_hashes = [] of {Int32, UInt64}
+
+      bands.times do |band_idx|
+        band_slice = signature[band_idx * rows...(band_idx * rows + rows)]
+        combined = 0_u64
+        band_slice.each { |_hash| combined = (combined << 7) ^ _hash }
+        band_hashes << {band_idx, combined}
+      end
+
+      band_hashes
+    end
+
     def self.generate_bands(signature : Slice(UInt32)) : Array({Int32, UInt64})
       _, bands, rows, _ = config
       band_hashes = [] of {Int32, UInt64}
@@ -130,7 +172,7 @@ module LexisMinhash
       1.0_f64 - (1.0_f64 - s_r) ** bands
     end
 
-    # Convert Slice(UInt32) to Bytes for storage
+    # Convert Slice(UInt32) or Array(UInt32) to Bytes for storage
     def self.signature_to_bytes(signature : Slice(UInt32)) : Bytes
       bytes = Bytes.new(signature.size * sizeof(UInt32))
       signature.each_with_index do |val, idx|
@@ -142,8 +184,34 @@ module LexisMinhash
       bytes
     end
 
-    # Convert Bytes back to Slice(UInt32)
-    def self.bytes_to_signature(bytes : Bytes) : Slice(UInt32)
+    def self.signature_to_bytes(signature : Array(UInt32)) : Bytes
+      bytes = Bytes.new(signature.size * sizeof(UInt32))
+      signature.each_with_index do |val, idx|
+        bytes[idx * sizeof(UInt32) + 0] = (val & 0xFF).to_u8
+        bytes[idx * sizeof(UInt32) + 1] = ((val >> 8) & 0xFF).to_u8
+        bytes[idx * sizeof(UInt32) + 2] = ((val >> 16) & 0xFF).to_u8
+        bytes[idx * sizeof(UInt32) + 3] = ((val >> 24) & 0xFF).to_u8
+      end
+      bytes
+    end
+
+    # Convert Bytes back to Array(UInt32) - default for backward compatibility
+    def self.bytes_to_signature(bytes : Bytes) : Array(UInt32)
+      return [] of UInt32 if bytes.empty?
+
+      signature = [] of UInt32
+      (bytes.size // sizeof(UInt32)).times do |idx|
+        val = bytes[idx * sizeof(UInt32) + 0].to_u32 |
+              (bytes[idx * sizeof(UInt32) + 1].to_u32 << 8) |
+              (bytes[idx * sizeof(UInt32) + 2].to_u32 << 16) |
+              (bytes[idx * sizeof(UInt32) + 3].to_u32 << 24)
+        signature << val
+      end
+      signature
+    end
+
+    # Convert Bytes to Slice(UInt32) - for performance-critical code
+    def self.bytes_to_signature_slice(bytes : Bytes) : Slice(UInt32)
       return Slice(UInt32).new(0) if bytes.empty?
 
       signature = Slice(UInt32).new(bytes.size // sizeof(UInt32))

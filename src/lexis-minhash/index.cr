@@ -74,7 +74,7 @@ module LexisMinhash
 
   # In-memory LSH index using Int32 doc IDs and linear probing storage
   class LSHIndex
-    @signatures : Hash(Int32, Slice(UInt32))
+    @signatures : Hash(Int32, Array(UInt32))
     @tables : Array(LinearBucketTable)
     @bands : Int32
     @rows : Int32
@@ -82,7 +82,7 @@ module LexisMinhash
     # Initialize with expected number of documents for capacity planning
     # Table capacity is ~2x expected docs per band for good load factor
     def initialize(bands : Int32 = 20, expected_docs : Int32 = 1000)
-      @signatures = Hash(Int32, Slice(UInt32)).new
+      @signatures = Hash(Int32, Array(UInt32)).new
       # Each band gets a table with ~2x expected entries
       table_capacity = expected_docs * 2
       @tables = Array.new(bands) { LinearBucketTable.new(table_capacity) }
@@ -100,7 +100,7 @@ module LexisMinhash
       end
     end
 
-    def add_with_signature(doc_id : Int32, signature : Slice(UInt32)) : Nil
+    def add_with_signature(doc_id : Int32, signature : Array(UInt32)) : Nil
       @signatures[doc_id] = signature.dup
 
       band_hashes = Engine.generate_bands(signature)
@@ -114,7 +114,7 @@ module LexisMinhash
       query_by_signature(signature)
     end
 
-    def query_by_signature(signature : Slice(UInt32)) : Set(Int32)
+    def query_by_signature(signature : Array(UInt32)) : Set(Int32)
       candidates = Set(Int32).new
 
       band_hashes = Engine.generate_bands(signature)
@@ -132,7 +132,7 @@ module LexisMinhash
       query_with_scores_by_signature(signature)
     end
 
-    def query_with_scores_by_signature(signature : Slice(UInt32)) : Array({Int32, Float64})
+    def query_with_scores_by_signature(signature : Array(UInt32)) : Array({Int32, Float64})
       candidates = query_by_signature(signature)
 
       candidates.map do |doc_id|
@@ -166,7 +166,7 @@ module LexisMinhash
       pairs
     end
 
-    def get_signature(doc_id : Int32) : Slice(UInt32)?
+    def get_signature(doc_id : Int32) : Array(UInt32)?
       @signatures[doc_id]?
     end
 
