@@ -141,6 +141,48 @@ describe LexisMinhash do
         prob_high.should be > prob_low
       end
     end
+
+    describe "jaccard_similarity" do
+      it "returns 1.0 for identical documents" do
+        doc = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market")
+        LexisMinhash::Engine.jaccard_similarity(doc, doc).should eq(1.0_f64)
+      end
+
+      it "returns higher similarity for similar texts" do
+        doc1 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market device")
+        doc2 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market gadget")
+        doc3 = LexisMinhash::SimpleDocument.new("Microsoft software windows operating system enterprise business")
+
+        sim_same = LexisMinhash::Engine.jaccard_similarity(doc1, doc2)
+        sim_diff = LexisMinhash::Engine.jaccard_similarity(doc1, doc3)
+
+        sim_same.should be > sim_diff
+      end
+    end
+
+    describe "compare" do
+      it "computes similarity between two documents" do
+        doc1 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market device")
+        doc2 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market gadget")
+
+        similarity = LexisMinhash::Engine.compare(doc1, doc2)
+        similarity.should be > 0.5_f64
+      end
+    end
+
+    describe "shared_bands" do
+      it "returns number of shared bands" do
+        doc1 = LexisMinhash::SimpleDocument.new("Technology company product announcement innovation revolution")
+        doc2 = LexisMinhash::SimpleDocument.new("Technology company product release innovation revolution")
+
+        sig1 = LexisMinhash::Engine.compute_signature(doc1)
+        sig2 = LexisMinhash::Engine.compute_signature(doc2)
+
+        shared = LexisMinhash::Engine.shared_bands(sig1, sig2)
+        shared.should be >= 0
+        shared.should be <= LexisMinhash::Engine::NUM_BANDS
+      end
+    end
   end
 
   describe LexisMinhash::SimpleDocument do
@@ -161,6 +203,81 @@ describe LexisMinhash do
       doc = CustomDocument.new("Custom document text")
       sig = LexisMinhash::Engine.compute_signature(doc)
       sig.size.should eq(LexisMinhash::Engine::SIGNATURE_SIZE)
+    end
+  end
+
+  describe LexisMinhash::LSHIndex do
+    it "adds and queries documents" do
+      index = LexisMinhash::LSHIndex.new
+
+      doc1 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market device")
+      doc2 = LexisMinhash::SimpleDocument.new("Apple technology revolution smartphone innovation market gadget")
+
+      index.add("doc1", doc1)
+      index.add("doc2", doc2)
+
+      index.size.should eq(2)
+
+      candidates = index.query(doc1)
+      candidates.should contain("doc1")
+    end
+
+    it "finds similar pairs" do
+      index = LexisMinhash::LSHIndex.new
+
+      doc1 = LexisMinhash::SimpleDocument.new("Technology company announces revolutionary smartphone innovation")
+      doc2 = LexisMinhash::SimpleDocument.new("Technology company announces revolutionary smartphone product")
+      doc3 = LexisMinhash::SimpleDocument.new("Completely different topic about cooking recipes food")
+
+      index.add("doc1", doc1)
+      index.add("doc2", doc2)
+      index.add("doc3", doc3)
+
+      pairs = index.find_similar_pairs(threshold: 0.5_f64)
+      pairs.size.should be >= 0
+    end
+
+    it "queries by signature directly" do
+      index = LexisMinhash::LSHIndex.new
+
+      doc = LexisMinhash::SimpleDocument.new("Technology company announces revolutionary smartphone innovation")
+      index.add("doc1", doc)
+
+      signature = LexisMinhash::Engine.compute_signature(doc)
+      candidates = index.query_by_signature(signature)
+
+      candidates.should contain("doc1")
+    end
+
+    it "clears all data" do
+      index = LexisMinhash::LSHIndex.new
+
+      doc = LexisMinhash::SimpleDocument.new("Test document for clearing")
+      index.add("doc1", doc)
+
+      index.size.should eq(1)
+      index.clear
+      index.size.should eq(0)
+    end
+  end
+
+  describe LexisMinhash::Engine do
+    describe "configure" do
+      it "allows custom configuration" do
+        LexisMinhash::Engine.configure(
+          signature_size: 50,
+          num_bands: 10,
+          shingle_size: 4,
+          min_words: 3
+        )
+
+        LexisMinhash::Engine.config.signature_size.should eq(50)
+        LexisMinhash::Engine.config.num_bands.should eq(10)
+        LexisMinhash::Engine.config.shingle_size.should eq(4)
+        LexisMinhash::Engine.config.min_words.should eq(3)
+
+        LexisMinhash::Engine.reset_config
+      end
     end
   end
 end

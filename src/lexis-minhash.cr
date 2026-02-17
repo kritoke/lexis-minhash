@@ -2,6 +2,7 @@
 # Used to group duplicate or similar documents from various sources
 require "digest/sha256"
 require "set"
+require "mutex"
 
 # The main module containing all Lexis MinHash functionality
 module LexisMinhash
@@ -35,7 +36,7 @@ module LexisMinhash
       @num_bands : Int32 = 20,
       @shingle_size : Int32 = 3,
       @min_words : Int32 = 6,
-      @stop_words : Set(String) = Set(String).new
+      @stop_words : Set(String) = Set(String).new,
     )
     end
 
@@ -62,25 +63,30 @@ module LexisMinhash
     "get", "gets", "got", "make", "makes", "made", "take", "takes", "took",
     "see", "sees", "saw", "know", "knows", "knew", "think", "thinks", "thought",
     "want", "wants", "use", "uses", "used", "find", "finds", "found",
+    "build", "building", "built", "using", "via", "making", "way",
+    "youre", "your", "work", "works", "working",
   ])
 
   # The main engine for MinHash and LSH operations
   module Engine
     # Default configuration constants (for backward compatibility)
-    SIGNATURE_SIZE = 100
-    NUM_BANDS = 20
-    ROWS_PER_BAND = SIGNATURE_SIZE // NUM_BANDS
-    SHINGLE_SIZE = 3
-    MIN_WORDS_FOR_CLUSTERING = 6
-    SIMILARITY_THRESHOLD = 0.75
+    SIGNATURE_SIZE           = 100
+    NUM_BANDS                =  20
+    ROWS_PER_BAND            = SIGNATURE_SIZE // NUM_BANDS
+    SHINGLE_SIZE             =    3
+    MIN_WORDS_FOR_CLUSTERING =    6
+    SIMILARITY_THRESHOLD     = 0.75
     SHORT_HEADLINE_THRESHOLD = 0.85
 
     @@config : Config = Config.new
     @@hash_coeffs : Array(UInt32) = [] of UInt32
+    @@mutex = Mutex.new
 
     def self.config : Config
-      ensure_initialized
-      @@config
+      @@mutex.synchronize do
+        ensure_initialized
+        @@config
+      end
     end
 
     private def self.ensure_initialized
@@ -94,16 +100,18 @@ module LexisMinhash
       num_bands : Int32 = 20,
       shingle_size : Int32 = 3,
       min_words : Int32 = 6,
-      stop_words : Set(String) = DEFAULT_STOP_WORDS
+      stop_words : Set(String) = DEFAULT_STOP_WORDS,
     ) : Nil
-      @@config = Config.new(
-        signature_size: signature_size,
-        num_bands: num_bands,
-        shingle_size: shingle_size,
-        min_words: min_words,
-        stop_words: stop_words
-      )
-      @@hash_coeffs = generate_hash_coeffs(signature_size)
+      @@mutex.synchronize do
+        @@config = Config.new(
+          signature_size: signature_size,
+          num_bands: num_bands,
+          shingle_size: shingle_size,
+          min_words: min_words,
+          stop_words: stop_words
+        )
+        @@hash_coeffs = generate_hash_coeffs(signature_size)
+      end
     end
 
     private def self.generate_hash_coeffs(count : Int32) : Array(UInt32)
@@ -113,15 +121,16 @@ module LexisMinhash
     end
 
     def self.reset_config : Nil
-      @@config = Config.new
-      @@hash_coeffs = generate_hash_coeffs(@@config.signature_size)
+      @@mutex.synchronize do
+        @@config = Config.new
+        @@hash_coeffs = generate_hash_coeffs(@@config.signature_size)
+      end
     end
 
     # Compute MinHash signature for a document
     # Uses true MinHash with k random hash functions
     def self.compute_signature(document : Document) : Array(UInt32)
-      ensure_initialized
-      config = @@config
+      config, hash_coeffs = config_and_coeffs
       normalized = document.text.downcase.strip
       return Array(UInt32).new(config.signature_size, 0_u32) if normalized.empty?
 
@@ -135,11 +144,25 @@ module LexisMinhash
       shingles = generate_shingles(filtered_text, config.shingle_size)
       return Array(UInt32).new(config.signature_size, 0_u32) if shingles.empty?
 
-      compute_true_minhash(shingles)
+      compute_true_minhash(shingles, hash_coeffs)
     end
 
-    private def self.compute_true_minhash(shingles : Array(String)) : Array(UInt32)
-      @@hash_coeffs.map do |seed|
+    private def self.config_and_coeffs : {Config, Array(UInt32)}
+      @@mutex.synchronize do
+        ensure_initialized
+        {@@config, @@hash_coeffs.dup}
+      end
+    end
+
+    private def self.current_config : Config
+      @@mutex.synchronize do
+        ensure_initialized
+        @@config
+      end
+    end
+
+    private def self.compute_true_minhash(shingles : Array(String), hash_coeffs : Array(UInt32)) : Array(UInt32)
+      hash_coeffs.map do |seed|
         min_val = UInt32::MAX
         shingles.each do |shingle|
           h = seed_hash(shingle, seed)
@@ -147,6 +170,19 @@ module LexisMinhash
         end
         min_val
       end
+    end
+
+    private def self.sha256_hash(input : String) : UInt64
+      hash = Digest::SHA256.digest(input)
+      slice = hash.to_slice
+      slice[0].to_u64 |
+        (slice[1].to_u64 << 8) |
+        (slice[2].to_u64 << 16) |
+        (slice[3].to_u64 << 24) |
+        (slice[4].to_u64 << 32) |
+        (slice[5].to_u64 << 40) |
+        (slice[6].to_u64 << 48) |
+        (slice[7].to_u64 << 56)
     end
 
     private def self.seed_hash(input : String, seed : UInt64) : UInt32
@@ -186,7 +222,7 @@ module LexisMinhash
     end
 
     private def self.shingles_to_set(document : Document) : Set(UInt64)
-      config = @@config
+      config = current_config
       normalized = document.text.downcase.strip
       return Set(UInt64).new if normalized.empty?
 
@@ -198,7 +234,7 @@ module LexisMinhash
       return Set(UInt64).new if filtered_word_count < 2
 
       shingles = generate_shingles(filtered_text, config.shingle_size)
-      shingles.map { |s| sha256_hash(s) }.to_set
+      shingles.map { |shingle| sha256_hash(shingle) }.to_set
     end
 
     def self.compare(doc1 : Document, doc2 : Document) : Float64
@@ -227,7 +263,7 @@ module LexisMinhash
     end
 
     def self.generate_bands(signature : Array(UInt32)) : Array({Int32, UInt64})
-      config = @@config
+      config = current_config
       rows_per_band = config.rows_per_band
       bands = [] of {Int32, UInt64}
 
@@ -253,7 +289,7 @@ module LexisMinhash
     end
 
     def self.detection_probability(similarity : Float64) : Float64
-      config = @@config
+      config = current_config
       s_r = similarity ** config.rows_per_band
       1.0_f64 - (1.0_f64 - s_r) ** config.num_bands
     end
@@ -306,6 +342,10 @@ module LexisMinhash
 
     def query(document : Document, max_candidates : Int32 = 100) : Set(String)
       signature = Engine.compute_signature(document)
+      query_by_signature(signature, max_candidates)
+    end
+
+    def query_by_signature(signature : Array(UInt32), max_candidates : Int32 = 100) : Set(String)
       bands = Engine.generate_bands(signature)
       candidates = Set(String).new
 
@@ -320,26 +360,30 @@ module LexisMinhash
     end
 
     def query_with_scores(document : Document, max_candidates : Int32 = 100) : Array({String, Float64})
-      candidates = query(document, max_candidates)
       signature = Engine.compute_signature(document)
+      query_with_scores_by_signature(signature, max_candidates)
+    end
+
+    def query_with_scores_by_signature(signature : Array(UInt32), max_candidates : Int32 = 100) : Array({String, Float64})
+      candidates = query_by_signature(signature, max_candidates)
 
       candidates.map do |doc_id|
         other_sig = @signatures[doc_id]?
         score = other_sig ? Engine.similarity(signature, other_sig) : 0.0_f64
         {doc_id, score}
-      end.sort_by { |_doc, score| -score }
+      end.sort_by! { |_doc, score| -score }
     end
 
     def find_similar_pairs(threshold : Float64 = 0.75) : Set({String, String})
       pairs = Set({String, String}).new
-      checked = Set(String).new
+      checked = Set({String, String}).new
 
       @signatures.each do |doc_id, signature|
-        candidates = query(Engine::SimpleDocument.new(""), max_candidates: 50)
+        candidates = query_by_signature(signature, max_candidates: 50)
 
         candidates.each do |other_id|
           next if doc_id == other_id
-          pair_key = {doc_id, other_id}.sort
+          pair_key = doc_id < other_id ? {doc_id, other_id} : {other_id, doc_id}
           next if checked.includes?(pair_key)
           checked << pair_key
 

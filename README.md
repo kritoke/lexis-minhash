@@ -4,11 +4,13 @@ Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting simila
 
 ## Features
 
-- **MinHash Signature Generation**: Generate unique hash signatures for text documents
-- **Jaccard Similarity Calculation**: Compute similarity between document signatures
+- **MinHash Signature Generation**: Generate unique hash signatures for text documents using true MinHash with k random hash functions
+- **Jaccard Similarity Calculation**: Compute exact Jaccard similarity between documents using shingle sets
+- **Signature Similarity**: Fast approximate similarity using MinHash signatures
 - **Locality-Sensitive Hashing (LSH)**: Efficiently find candidate similar documents using banding
+- **LSH Index**: In-memory index for fast similarity queries across document collections
 - **Stop Word Filtering**: Remove common words that don't contribute to document meaning
-- **Configurable Parameters**: Adjust signature size, band count, and similarity thresholds
+- **Runtime Configuration**: Adjust signature size, band count, shingle size, and more at runtime
 
 ## Installation
 
@@ -76,16 +78,28 @@ sig = LexisMinhash::Engine.compute_signature(doc)
 
 ## Configuration
 
-The engine has several configurable constants:
+The engine supports runtime configuration via the `configure` method:
 
 ```crystal
-LexisMinhash::Engine::SIGNATURE_SIZE          # Number of hash functions (100)
-LexisMinhash::Engine::NUM_BANDS                # Number of bands for LSH (20)
-LexisMinhash::Engine::ROWS_PER_BAND            # Rows per band (5)
-LexisMinhash::Engine::SIMILARITY_THRESHOLD     # Default similarity threshold (0.75)
-LexisMinhash::Engine::SHORT_HEADLINE_THRESHOLD # Threshold for short texts (0.85)
-LexisMinhash::Engine::MIN_WORDS_FOR_CLUSTERING # Minimum word count for clustering (6)
-LexisMinhash::Engine::SHINGLE_SIZE             # Shingle size for text decomposition (3)
+LexisMinhash::Engine.configure(
+  signature_size: 100,    # Number of hash functions
+  num_bands: 20,          # Number of bands for LSH
+  shingle_size: 3,        # Shingle size for text decomposition
+  min_words: 6,           # Minimum word count for clustering
+  stop_words: LexisMinhash::DEFAULT_STOP_WORDS
+)
+```
+
+Default configuration values:
+- `signature_size`: 100
+- `num_bands`: 20
+- `rows_per_band`: 5 (calculated as signature_size / num_bands)
+- `shingle_size`: 3
+- `min_words`: 6
+
+Reset to defaults:
+```crystal
+LexisMinhash::Engine.reset_config
 ```
 
 ## Algorithms
@@ -106,6 +120,52 @@ LSH allows for efficient approximate nearest neighbor search in high-dimensional
 1. Signature matrix banding
 2. Hash-based indexing of bands
 3. Fast candidate pair generation
+
+## LSH Index
+
+The `LSHIndex` class provides an in-memory index for efficient similarity queries:
+
+```crystal
+index = LexisMinhash::LSHIndex.new
+
+# Add documents
+index.add("doc1", LexisMinhash::SimpleDocument.new("First document text"))
+index.add("doc2", LexisMinhash::SimpleDocument.new("Second document text"))
+
+# Query for similar documents
+candidates = index.query(LexisMinhash::SimpleDocument.new("First document text"))
+
+# Query with similarity scores
+scored = index.query_with_scores(LexisMinhash::SimpleDocument.new("First document text"))
+scored.each do |doc_id, score|
+  puts "#{doc_id}: #{score}"
+end
+
+# Find all similar pairs above threshold
+pairs = index.find_similar_pairs(threshold: 0.75)
+
+# Get index size
+puts index.size
+
+# Clear the index
+index.clear
+```
+
+## API Reference
+
+### Engine Methods
+
+| Method | Description |
+|--------|-------------|
+| `compute_signature(document)` | Generate MinHash signature for a document |
+| `similarity(sig1, sig2)` | Compare two signatures (0.0 to 1.0) |
+| `compare(doc1, doc2)` | Compare two documents directly |
+| `jaccard_similarity(doc1, doc2)` | Compute exact Jaccard similarity |
+| `generate_bands(signature)` | Generate LSH bands from signature |
+| `shared_bands(sig1, sig2)` | Count shared bands between signatures |
+| `detection_probability(similarity)` | Probability of detecting items at given similarity |
+| `signature_to_bytes(signature)` | Convert signature to bytes for storage |
+| `bytes_to_signature(bytes)` | Convert bytes back to signature |
 
 ## Development
 
