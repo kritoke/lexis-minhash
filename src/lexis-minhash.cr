@@ -1,25 +1,20 @@
 # Lexis MinHash - Locality-Sensitive Hashing for text similarity detection
 # Used to group duplicate or similar documents from various sources
-require "digest/sha256"
-require "set"
-require "mutex"
 require "deque"
+require "mutex"
 require "random/secure"
+require "set"
 
 require "./lexis-minhash/engine"
-require "./lexis-minhash/fast_engine"
 require "./lexis-minhash/index"
 
-# The main module containing all Lexis MinHash functionality
 module LexisMinhash
-  # The Document interface that must be implemented by any document type
-  # that wants to use the Lexis MinHash engine.
+  # Document interface for custom document types
   module Document
-    # Returns the text content of the document for signature calculation
     abstract def text : String
   end
 
-  # Default implementation of the Document interface for simple text strings
+  # Simple document wrapper for text strings
   struct SimpleDocument
     include Document
 
@@ -28,48 +23,68 @@ module LexisMinhash
     def initialize(@text : String)
     end
   end
+end
 
-  # Configuration for the MinHash engine
-  struct Config
-    getter signature_size : Int32
-    getter num_bands : Int32
-    getter shingle_size : Int32
-    getter min_words : Int32
-    getter stop_words : Set(String)
-
-    def initialize(
-      @signature_size : Int32 = 100,
-      @num_bands : Int32 = 20,
-      @shingle_size : Int32 = 3,
-      @min_words : Int32 = 6,
-      @stop_words : Set(String) = Set(String).new,
-    )
-    end
-
-    def rows_per_band : Int32
-      @signature_size // @num_bands
-    end
+# Backward compatibility: allow Engine to accept Document interface
+# Extension for Engine module to support Document types and Array signatures
+module LexisMinhash::Engine
+  # Compute signature from a Document (backward compatibility)
+  def self.compute_signature(document : LexisMinhash::Document) : Slice(UInt32)
+    compute_signature(document.text)
   end
 
-  # Default stop words for clustering
-  DEFAULT_STOP_WORDS = Set.new([
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "as", "is", "was", "are", "were", "been",
-    "be", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "must", "shall", "can", "need",
-    "this", "that", "these", "those", "it", "its", "they", "them",
-    "time", "times", "day", "days", "week", "weeks", "month", "months",
-    "year", "years", "today", "yesterday", "tomorrow", "morning", "afternoon", "evening",
-    "new", "news", "latest", "update", "updates", "report", "reports",
-    "breaking", "exclusive", "special", "alert", "alerts", "coverage",
-    "says", "said", "saying", "tell", "tells", "told", "claim", "claims", "claimed",
-    "just", "now", "how", "what", "when", "where", "why", "also", "too",
-    "up", "down", "out", "over", "after", "before", "between", "under", "above",
-    "one", "two", "three", "first", "second", "third", "top", "bottom",
-    "get", "gets", "got", "make", "makes", "made", "take", "takes", "took",
-    "see", "sees", "saw", "know", "knows", "knew", "think", "thinks", "thought",
-    "want", "wants", "use", "uses", "used", "find", "finds", "found",
-    "build", "building", "built", "using", "via", "making", "way",
-    "youre", "your", "work", "works", "working",
-  ])
+  # Overload for Array(UInt32) signatures (backward compatibility)
+  def self.similarity(sig1 : Array(UInt32), sig2 : Array(UInt32)) : Float64
+    return 0.0_f64 if sig1.empty? || sig2.empty?
+    return 0.0_f64 if sig1.size != sig2.size
+
+    matches = 0
+    sig1.size.times do |i|
+      matches += 1 if sig1[i] == sig2[i]
+    end
+
+    matches.to_f64 / sig1.size.to_f64
+  end
+
+  # Overload for Array(UInt32) (backward compatibility)
+  def self.generate_bands(signature : Array(UInt32)) : Array({Int32, UInt64})
+    band_hashes = [] of {Int32, UInt64}
+    _, bands, rows, _ = config
+
+    bands.times do |band_idx|
+      band_slice = signature[band_idx * rows...(band_idx * rows + rows)]
+      combined = 0_u64
+      band_slice.each { |_hash| combined = (combined << 7) ^ _hash }
+      band_hashes << {band_idx, combined}
+    end
+
+    band_hashes
+  end
+
+  # Overload for Array(UInt32) (backward compatibility)
+  def self.signature_to_bytes(signature : Array(UInt32)) : Bytes
+    bytes = Bytes.new(signature.size * sizeof(UInt32))
+    signature.each_with_index do |val, idx|
+      bytes[idx * sizeof(UInt32) + 0] = (val & 0xFF).to_u8
+      bytes[idx * sizeof(UInt32) + 1] = ((val >> 8) & 0xFF).to_u8
+      bytes[idx * sizeof(UInt32) + 2] = ((val >> 16) & 0xFF).to_u8
+      bytes[idx * sizeof(UInt32) + 3] = ((val >> 24) & 0xFF).to_u8
+    end
+    bytes
+  end
+
+  # Convert Bytes to Array(UInt32) (backward compatibility)
+  def self.bytes_to_signature_array(bytes : Bytes) : Array(UInt32)
+    return [] of UInt32 if bytes.empty?
+
+    signature = [] of UInt32
+    (bytes.size // sizeof(UInt32)).times do |idx|
+      val = bytes[idx * sizeof(UInt32) + 0].to_u32 |
+            (bytes[idx * sizeof(UInt32) + 1].to_u32 << 8) |
+            (bytes[idx * sizeof(UInt32) + 2].to_u32 << 16) |
+            (bytes[idx * sizeof(UInt32) + 3].to_u32 << 24)
+      signature << val
+    end
+    signature
+  end
 end

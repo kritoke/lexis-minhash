@@ -39,14 +39,7 @@ sample_texts = [
 Benchmark.ips do |x|
   x.report("Engine.compute_signature") do
     sample_texts.each do |text|
-      doc = LexisMinhash::SimpleDocument.new(text)
-      LexisMinhash::Engine.compute_signature(doc)
-    end
-  end
-
-  x.report("FastEngine.compute_signature") do
-    sample_texts.each do |text|
-      LexisMinhash::FastEngine.compute_signature(text)
+      LexisMinhash::Engine.compute_signature(text)
     end
   end
 end
@@ -61,25 +54,24 @@ test_docs = [] of String
   test_docs << "Document number #{i} with some unique content about technology"
 end
 
-# Using LinearBucketTable (FastLSHIndex)
-fast_index = LexisMinhash::FastLSHIndex.new(bands: 20, expected_docs: 100)
-test_docs.each_with_index { |text, i| fast_index.add(i, text) }
+index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100)
+test_docs.each_with_index { |text, i| index.add(i, text) }
 
 Benchmark.ips do |x|
-  x.report("FastLSHIndex.add (100 docs)") do
-    idx = LexisMinhash::FastLSHIndex.new(bands: 20, expected_docs: 100)
+  x.report("LSHIndex.add (100 docs)") do
+    idx = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100)
     test_docs.each_with_index { |text, i| idx.add(i, text) }
   end
 
-  x.report("FastLSHIndex.query") do
-    test_docs.each { |text| fast_index.query(text) }
+  x.report("LSHIndex.query") do
+    test_docs.each { |text| index.query(text) }
   end
 
-  x.report("FastLSHIndex.find_similar_pairs") do
-    fast_index.find_similar_pairs(threshold: 0.75)
+  x.report("LSHIndex.find_similar_pairs") do
+    index.find_similar_pairs(threshold: 0.75)
   end
 end
 
 puts
 puts "=== Load Factors ==="
-puts "FastLSHIndex load factors per band: #{fast_index.load_factors.map(&.round(3))}"
+puts "LSHIndex load factors per band: #{index.load_factors.map(&.round(3))}"

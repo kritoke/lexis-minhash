@@ -1,229 +1,137 @@
 module LexisMinhash
-  module Engine
-    # Default configuration constants (for backward compatibility)
-    SIGNATURE_SIZE           = 100
-    NUM_BANDS                =  20
-    ROWS_PER_BAND            = SIGNATURE_SIZE // NUM_BANDS
-    SHINGLE_SIZE             =    3
-    MIN_WORDS_FOR_CLUSTERING =    6
-    SIMILARITY_THRESHOLD     = 0.75
-    SHORT_HEADLINE_THRESHOLD = 0.85
+  # Rolling hash for O(n) shingling
+  class ShingleRoller
+    P = 31_u64
+    getter window_size : Int32
+    @power = 1_u64
+    @current_hash = 0_u64
+    @buffer = Deque(UInt8).new
 
-    @@config : Config = Config.new
-    @@hash_coeffs : Array(UInt32) = [] of UInt32
+    def initialize(@window_size : Int32)
+      (@window_size - 1).times { @power = @power &* P }
+    end
+
+    # Returns nil until window is full, then returns hash
+    def roll(byte : UInt8) : UInt64?
+      if @buffer.size == @window_size
+        out_byte = @buffer.shift
+        @current_hash = @current_hash &- (out_byte.to_u64 &* @power)
+      end
+
+      @buffer << byte
+      @current_hash = (@current_hash &* P) &+ byte.to_u64
+
+      return nil if @buffer.size < @window_size
+      @current_hash
+    end
+
+    def reset : Nil
+      @current_hash = 0_u64
+      @buffer.clear
+    end
+  end
+
+  # MinHash engine using rolling hash + multiply-shift
+  # O(n) shingling with no intermediate string allocations
+  module Engine
+    @@a : Slice(UInt64) = Slice(UInt64).new(100)
+    @@b : Slice(UInt64) = Slice(UInt64).new(100)
+    @@num_hashes : Int32 = 100
+    @@bands : Int32 = 20
+    @@rows : Int32 = 5
+    @@shingle_size : Int32 = 5
     @@mutex = Mutex.new
 
-    def self.config : Config
-      @@mutex.synchronize do
-        ensure_initialized
-        @@config
-      end
-    end
-
-    private def self.ensure_initialized
-      if @@hash_coeffs.empty?
-        @@hash_coeffs = generate_hash_coeffs(@@config.signature_size)
-      end
-    end
+    # Default configuration constants
+    SIGNATURE_SIZE = 100
+    NUM_BANDS      =  20
+    ROWS_PER_BAND  =   5
+    SHINGLE_SIZE   =   5
 
     def self.configure(
       signature_size : Int32 = 100,
       num_bands : Int32 = 20,
-      shingle_size : Int32 = 3,
-      min_words : Int32 = 6,
-      stop_words : Set(String) = DEFAULT_STOP_WORDS,
+      shingle_size : Int32 = 5,
     ) : Nil
       @@mutex.synchronize do
-        @@config = Config.new(
-          signature_size: signature_size,
-          num_bands: num_bands,
-          shingle_size: shingle_size,
-          min_words: min_words,
-          stop_words: stop_words
-        )
-        @@hash_coeffs = generate_hash_coeffs(signature_size)
+        @@num_hashes = signature_size
+        @@bands = num_bands
+        @@rows = signature_size // num_bands
+        @@shingle_size = shingle_size
+        @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
+        @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
       end
     end
 
-    private def self.generate_hash_coeffs(count : Int32) : Array(UInt32)
-      count.times.map do
-        Random::Secure.rand(UInt32)
-      end.to_a
-    end
-
-    def self.reset_config : Nil
+    def self.config : {Int32, Int32, Int32, Int32}
       @@mutex.synchronize do
-        @@config = Config.new
-        @@hash_coeffs = generate_hash_coeffs(@@config.signature_size)
+        {@@num_hashes, @@bands, @@rows, @@shingle_size}
       end
     end
 
-    def self.compute_signature(document : Document) : Array(UInt32)
-      config, hash_coeffs = config_and_coeffs
-      normalized = document.text.downcase.strip
-      return Array(UInt32).new(config.signature_size, 0_u32) if normalized.empty?
+    # Compute signature using rolling hash + multiply-shift
+    def self.compute_signature(text : String) : Slice(UInt32)
+      num_hashes, _, _, shingle_size = config
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      roller = ShingleRoller.new(shingle_size)
 
-      word_count = normalized.split(/\s+/).size
-      return Array(UInt32).new(config.signature_size, 0_u32) if word_count < config.min_words
-
-      filtered_text = remove_stop_words(normalized, config.stop_words)
-      filtered_word_count = filtered_text.split(/\s+/).size
-      return Array(UInt32).new(config.signature_size, 0_u32) if filtered_word_count < 2
-
-      shingles = generate_shingles(filtered_text, config.shingle_size)
-      return Array(UInt32).new(config.signature_size, 0_u32) if shingles.empty?
-
-      compute_true_minhash(shingles, hash_coeffs)
-    end
-
-    private def self.config_and_coeffs : {Config, Array(UInt32)}
-      @@mutex.synchronize do
-        ensure_initialized
-        {@@config, @@hash_coeffs.dup}
-      end
-    end
-
-    private def self.current_config : Config
-      @@mutex.synchronize do
-        ensure_initialized
-        @@config
-      end
-    end
-
-    private def self.compute_true_minhash(shingles : Array(String), hash_coeffs : Array(UInt32)) : Array(UInt32)
-      hash_coeffs.map do |seed|
-        min_val = UInt32::MAX
-        shingles.each do |shingle|
-          h = seed_hash(shingle, seed)
-          min_val = h if h < min_val
+      text.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          update_signature(signature, h64)
         end
-        min_val
+      end
+
+      signature
+    end
+
+    private def self.update_signature(signature : Slice(UInt32), h64 : UInt64) : Nil
+      num_hashes, _, _, _ = config
+      a = @@a
+      b = @@b
+
+      num_hashes.times do |i|
+        combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
+        signature[i] = combined_h if combined_h < signature[i]
       end
     end
 
-    private def self.sha256_hash(input : String) : UInt64
-      hash = Digest::SHA256.digest(input)
-      slice = hash.to_slice
-      slice[0].to_u64 |
-        (slice[1].to_u64 << 8) |
-        (slice[2].to_u64 << 16) |
-        (slice[3].to_u64 << 24) |
-        (slice[4].to_u64 << 32) |
-        (slice[5].to_u64 << 40) |
-        (slice[6].to_u64 << 48) |
-        (slice[7].to_u64 << 56)
-    end
-
-    private def self.seed_hash(input : String, seed : UInt64) : UInt32
-      combined = "#{seed}#{input}"
-      hash = Digest::SHA256.digest(combined)
-      slice = hash.to_slice
-      slice[0].to_u32 |
-        (slice[1].to_u32 << 8) |
-        (slice[2].to_u32 << 16) |
-        (slice[3].to_u32 << 24)
-    end
-
-    private def self.remove_stop_words(text : String, stop_words : Set(String)) : String
-      words = text.split(/\s+/)
-      filtered = words.reject { |word| stop_words.includes?(word) }
-      filtered.join(" ")
-    end
-
-    private def self.generate_shingles(text : String, size : Int32) : Array(String)
-      return [] of String if text.size < size
-
-      (0...(text.size - size + 1)).map do |i|
-        text[i...i + size]
-      end
-    end
-
-    def self.jaccard_similarity(doc1 : Document, doc2 : Document) : Float64
-      set1 = shingles_to_set(doc1)
-      set2 = shingles_to_set(doc2)
-      return 0.0_f64 if set1.empty? && set2.empty?
-
-      intersection = set1 & set2
-      union = set1 | set2
-      return 0.0_f64 if union.empty?
-
-      intersection.size.to_f64 / union.size.to_f64
-    end
-
-    private def self.shingles_to_set(document : Document) : Set(UInt64)
-      config = current_config
-      normalized = document.text.downcase.strip
-      return Set(UInt64).new if normalized.empty?
-
-      word_count = normalized.split(/\s+/).size
-      return Set(UInt64).new if word_count < config.min_words
-
-      filtered_text = remove_stop_words(normalized, config.stop_words)
-      filtered_word_count = filtered_text.split(/\s+/).size
-      return Set(UInt64).new if filtered_word_count < 2
-
-      shingles = generate_shingles(filtered_text, config.shingle_size)
-      shingles.map { |shingle| sha256_hash(shingle) }.to_set
-    end
-
-    def self.compare(doc1 : Document, doc2 : Document) : Float64
-      sig1 = compute_signature(doc1)
-      sig2 = compute_signature(doc2)
-      similarity(sig1, sig2)
-    end
-
-    def self.similarity(sig1 : Array(UInt32), sig2 : Array(UInt32)) : Float64
+    # Compute similarity between two signatures
+    def self.similarity(sig1 : Slice(UInt32), sig2 : Slice(UInt32)) : Float64
       return 0.0_f64 if sig1.empty? || sig2.empty?
+      return 0.0_f64 if sig1.size != sig2.size
 
       matches = 0
-      sig1.each_with_index do |val1, idx|
-        matches += 1 if val1 == sig2[idx]?
+      sig1.size.times do |i|
+        matches += 1 if sig1[i] == sig2[i]
       end
 
       matches.to_f64 / sig1.size.to_f64
     end
 
-    def self.shared_bands(sig1 : Array(UInt32), sig2 : Array(UInt32)) : Int32
-      return 0 if sig1.empty? || sig2.empty?
+    # Generate LSH bands from signature
+    # Returns Array({Int32, UInt64}) with {band_index, band_hash} tuples
+    def self.generate_bands(signature : Slice(UInt32)) : Array({Int32, UInt64})
+      _, bands, rows, _ = config
+      band_hashes = [] of {Int32, UInt64}
 
-      bands1 = generate_bands(sig1).to_set
-      bands2 = generate_bands(sig2).to_set
-      (bands1 & bands2).size
-    end
-
-    def self.generate_bands(signature : Array(UInt32)) : Array({Int32, UInt64})
-      config = current_config
-      rows_per_band = config.rows_per_band
-      bands = [] of {Int32, UInt64}
-
-      config.num_bands.times do |band_index|
-        start_idx = band_index * rows_per_band
-        end_idx = start_idx + rows_per_band
-
-        band_hashes = signature[start_idx...end_idx]
-        band_hash = combine_hashes(band_hashes)
-
-        bands << {band_index, band_hash}
+      bands.times do |band_idx|
+        band_slice = signature[band_idx * rows, rows]
+        band_hashes << {band_idx, band_slice.hash.to_u64}
       end
 
-      bands
+      band_hashes
     end
 
-    private def self.combine_hashes(hashes : Array(UInt32)) : UInt64
-      combined = 0_u64
-      hashes.each do |hash_val|
-        combined = (combined << 7) ^ hash_val
-      end
-      combined
-    end
-
+    # Estimate probability of detecting similar items
+    # Based on s (similarity), b (bands), r (rows per band)
     def self.detection_probability(similarity : Float64) : Float64
-      config = current_config
-      s_r = similarity ** config.rows_per_band
-      1.0_f64 - (1.0_f64 - s_r) ** config.num_bands
+      _, bands, rows, _ = config
+      s_r = similarity ** rows
+      1.0_f64 - (1.0_f64 - s_r) ** bands
     end
 
-    def self.signature_to_bytes(signature : Array(UInt32)) : Bytes
+    # Convert Slice(UInt32) to Bytes for storage
+    def self.signature_to_bytes(signature : Slice(UInt32)) : Bytes
       bytes = Bytes.new(signature.size * sizeof(UInt32))
       signature.each_with_index do |val, idx|
         bytes[idx * sizeof(UInt32) + 0] = (val & 0xFF).to_u8
@@ -234,16 +142,16 @@ module LexisMinhash
       bytes
     end
 
-    def self.bytes_to_signature(bytes : Bytes) : Array(UInt32)
-      return Array(UInt32).new if bytes.empty?
+    # Convert Bytes back to Slice(UInt32)
+    def self.bytes_to_signature(bytes : Bytes) : Slice(UInt32)
+      return Slice(UInt32).new(0) if bytes.empty?
 
-      signature = [] of UInt32
-      (bytes.size // sizeof(UInt32)).times do |idx|
-        val = bytes[idx * sizeof(UInt32) + 0].to_u32 |
-              (bytes[idx * sizeof(UInt32) + 1].to_u32 << 8) |
-              (bytes[idx * sizeof(UInt32) + 2].to_u32 << 16) |
-              (bytes[idx * sizeof(UInt32) + 3].to_u32 << 24)
-        signature << val
+      signature = Slice(UInt32).new(bytes.size // sizeof(UInt32))
+      signature.size.times do |idx|
+        signature[idx] = bytes[idx * sizeof(UInt32) + 0].to_u32 |
+                         (bytes[idx * sizeof(UInt32) + 1].to_u32 << 8) |
+                         (bytes[idx * sizeof(UInt32) + 2].to_u32 << 16) |
+                         (bytes[idx * sizeof(UInt32) + 3].to_u32 << 24)
       end
       signature
     end

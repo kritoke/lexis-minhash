@@ -1,16 +1,15 @@
 # Lexis MinHash
 
-Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It provides efficient clustering of similar documents by generating hash signatures and using banding techniques for fast similarity search.
+Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It uses rolling hash + multiply-shift for O(n) performance.
 
 ## Features
 
-- **MinHash Signature Generation**: Generate unique hash signatures for text documents using true MinHash with k random hash functions
-- **Jaccard Similarity Calculation**: Compute exact Jaccard similarity between documents using shingle sets
-- **Signature Similarity**: Fast approximate similarity using MinHash signatures
-- **Locality-Sensitive Hashing (LSH)**: Efficiently find candidate similar documents using banding
-- **LSH Index**: In-memory index for fast similarity queries across document collections
-- **Stop Word Filtering**: Remove common words that don't contribute to document meaning
-- **Runtime Configuration**: Adjust signature size, band count, shingle size, and more at runtime
+- **O(n) MinHash Signatures**: Rolling hash + multiply-shift, no intermediate string allocations
+- **Signature Similarity**: Fast approximate Jaccard similarity estimation
+- **Locality-Sensitive Hashing (LSH)**: Efficient candidate retrieval using banding
+- **LSH Index**: In-memory index with linear probing for cache-efficient storage
+- **Thread-Safe**: Mutex-protected configuration
+- **Runtime Configuration**: Adjust signature size, band count, shingle size at runtime
 
 ## Installation
 
@@ -20,48 +19,66 @@ Add the dependency to your `shard.yml`:
 dependencies:
   lexis-minhash:
     github: kritoke/lexis-minhash
-    version: ~> 0.1.0
+    version: ~> 0.2.0
 ```
 
 Then run `shards install`.
 
 ## Usage
 
-### Document Interface
-
-The Lexis MinHash engine requires all documents to implement the `LexisMinhash::Document` interface, which defines a single method `text : String` that returns the text content of the document for signature calculation.
-
 ### Basic Usage
 
 ```crystal
 require "lexis-minhash"
 
-# Create document instances using the built-in SimpleDocument
-document1 = LexisMinhash::SimpleDocument.new("Document 1 text here")
-document2 = LexisMinhash::SimpleDocument.new("Document 2 text here")
+# Generate signatures directly from strings
+sig1 = LexisMinhash::Engine.compute_signature("Document 1 text here")
+sig2 = LexisMinhash::Engine.compute_signature("Document 2 text here")
 
-# Generate signatures
-sig1 = LexisMinhash::Engine.compute_signature(document1)
-sig2 = LexisMinhash::Engine.compute_signature(document2)
-
-# Calculate similarity
+# Calculate similarity (0.0 to 1.0)
 similarity = LexisMinhash::Engine.similarity(sig1, sig2)
 puts "Similarity: #{similarity}"
 
-# Find candidate similar documents using LSH
-bands1 = LexisMinhash::Engine.generate_bands(sig1)
-bands2 = LexisMinhash::Engine.generate_bands(sig2)
-
-# Check if they share any bands (potential candidates)
-shared_bands = bands1 & bands2
-puts "Shared bands: #{shared_bands.size}"
+# Generate LSH bands for candidate detection
+bands = LexisMinhash::Engine.generate_bands(sig1)
+# bands is Array({Int32, UInt64}) with {band_index, band_hash} tuples
 ```
 
-### Using Custom Document Types
-
-You can implement your own document types by including the `LexisMinhash::Document` module:
+### Using LSHIndex
 
 ```crystal
+# Create index with expected document count for capacity planning
+index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 1000)
+
+# Add documents with Int32 IDs
+index.add(1, "Technology company announces revolutionary product")
+index.add(2, "Technology company announces revolutionary update")
+
+# Query for similar documents
+candidates = index.query("Technology company announces")
+# candidates is Set(Int32) of doc IDs
+
+# Query with similarity scores
+scored = index.query_with_scores("Technology company announces")
+scored.each do |doc_id, score|
+  puts "#{doc_id}: #{score}"
+end
+
+# Find all similar pairs above threshold
+pairs = index.find_similar_pairs(threshold: 0.75)
+
+# Monitor table utilization
+puts index.load_factors  # Array(Float64) per band
+
+# Storage operations
+bytes = LexisMinhash::Engine.signature_to_bytes(sig)
+restored = LexisMinhash::Engine.bytes_to_signature(bytes)
+```
+
+### Custom Document Types (Backward Compatibility)
+
+```crystal
+# Implement Document interface for custom types
 struct MyDocument
   include LexisMinhash::Document
 
@@ -71,66 +88,33 @@ struct MyDocument
   end
 end
 
-# Now use your custom document type
 doc = MyDocument.new("Custom document text")
 sig = LexisMinhash::Engine.compute_signature(doc)
 ```
 
 ## Configuration
 
-The engine supports runtime configuration via the `configure` method:
-
 ```crystal
 LexisMinhash::Engine.configure(
-  signature_size: 100,    # Number of hash functions
-  num_bands: 20,          # Number of bands for LSH
-  shingle_size: 3,        # Shingle size for text decomposition
-  min_words: 6,           # Minimum word count for clustering
-  stop_words: LexisMinhash::DEFAULT_STOP_WORDS
+  signature_size: 100,  # Number of hash functions
+  num_bands: 20,        # Number of bands for LSH
+  shingle_size: 5       # Character shingle size
 )
 ```
 
-Default configuration values:
+Default values:
 - `signature_size`: 100
 - `num_bands`: 20
 - `rows_per_band`: 5 (calculated as signature_size / num_bands)
-- `shingle_size`: 3
-- `min_words`: 6
-
-Reset to defaults:
-```crystal
-LexisMinhash::Engine.reset_config
-```
-
-## Algorithms
-
-### MinHash
-
-MinHash (minimum hash) is a technique for quickly estimating the Jaccard similarity between two sets. It works by:
-
-1. Converting text to shingles (character n-grams)
-2. Applying multiple hash functions to each shingle
-3. Recording the minimum hash value for each hash function
-4. The signature similarity approximates Jaccard similarity
-
-### Locality-Sensitive Hashing (LSH)
-
-LSH allows for efficient approximate nearest neighbor search in high-dimensional spaces. The implementation uses:
-
-1. Signature matrix banding
-2. Hash-based indexing of bands
-3. Fast candidate pair generation
+- `shingle_size`: 5
 
 ## Performance
 
-FastEngine uses rolling hash + multiply-shift instead of SHA256:
+Using rolling hash + multiply-shift:
 
 ```
-Engine.compute_signature    42.14  (23.73ms)   44.10× slower
-FastEngine.compute_signature 1.86k (538.12µs)       fastest
+Engine.compute_signature   1.95k (512µs)  2.66kB/op
 ```
-
-**FastEngine is ~44x faster** than the SHA256-based Engine.
 
 ### LSH Parameter Tuning
 
@@ -146,64 +130,47 @@ Default (20 bands, 5 rows) gives 99.56% detection at 0.75 similarity.
 
 Run benchmarks: `crystal run benchmark/benchmark.cr --release`
 
-## LSH Index
-
-The `LSHIndex` class provides an in-memory index for efficient similarity queries:
-
-```crystal
-index = LexisMinhash::LSHIndex.new
-
-# Add documents
-index.add("doc1", LexisMinhash::SimpleDocument.new("First document text"))
-index.add("doc2", LexisMinhash::SimpleDocument.new("Second document text"))
-
-# Query for similar documents
-candidates = index.query(LexisMinhash::SimpleDocument.new("First document text"))
-
-# Query with similarity scores
-scored = index.query_with_scores(LexisMinhash::SimpleDocument.new("First document text"))
-scored.each do |doc_id, score|
-  puts "#{doc_id}: #{score}"
-end
-
-# Find all similar pairs above threshold
-pairs = index.find_similar_pairs(threshold: 0.75)
-
-# Get index size
-puts index.size
-
-# Clear the index
-index.clear
-```
-
 ## API Reference
 
 ### Engine Methods
 
 | Method | Description |
 |--------|-------------|
-| `compute_signature(document)` | Generate MinHash signature for a document |
+| `compute_signature(text : String)` | Generate MinHash signature |
+| `compute_signature(doc : Document)` | Generate signature from Document interface |
 | `similarity(sig1, sig2)` | Compare two signatures (0.0 to 1.0) |
-| `compare(doc1, doc2)` | Compare two documents directly |
-| `jaccard_similarity(doc1, doc2)` | Compute exact Jaccard similarity |
-| `generate_bands(signature)` | Generate LSH bands from signature |
-| `shared_bands(sig1, sig2)` | Count shared bands between signatures |
+| `generate_bands(signature)` | Generate LSH bands, returns `Array({Int32, UInt64})` |
 | `detection_probability(similarity)` | Probability of detecting items at given similarity |
 | `signature_to_bytes(signature)` | Convert signature to bytes for storage |
-| `bytes_to_signature(bytes)` | Convert bytes back to signature |
+| `bytes_to_signature(bytes)` | Convert bytes back to `Slice(UInt32)` |
+| `bytes_to_signature_array(bytes)` | Convert bytes back to `Array(UInt32)` (compat) |
+
+### LSHIndex Methods
+
+| Method | Description |
+|--------|-------------|
+| `add(doc_id : Int32, text : String)` | Add document to index |
+| `add_with_signature(doc_id, signature)` | Add with pre-computed signature |
+| `query(text : String)` | Find candidate doc IDs |
+| `query_by_signature(signature)` | Query with pre-computed signature |
+| `query_with_scores(text)` | Query with similarity scores |
+| `find_similar_pairs(threshold)` | Find all similar pairs |
+| `get_signature(doc_id)` | Get stored signature |
+| `load_factors` | Table utilization per band |
+| `size` | Number of indexed documents |
+| `clear` | Clear all data |
 
 ## Development
 
-To run the test suite:
-
 ```bash
+# Run tests
 crystal spec
-```
 
-To run the linter:
-
-```bash
+# Run linter
 bin/ameba
+
+# Run benchmarks
+crystal run benchmark/benchmark.cr --release
 ```
 
 ## Contributing
