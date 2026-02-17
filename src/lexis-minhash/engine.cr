@@ -40,6 +40,7 @@ module LexisMinhash
     @@bands : Int32 = 20
     @@rows : Int32 = 5
     @@shingle_size : Int32 = 5
+    @@min_words : Int32 = 4
     @@initialized = false
     @@mutex = Mutex.new
 
@@ -48,6 +49,7 @@ module LexisMinhash
     NUM_BANDS      =  20
     ROWS_PER_BAND  =   5
     SHINGLE_SIZE   =   5
+    MIN_WORDS      =   4
 
     private def self.ensure_initialized
       return if @@initialized
@@ -63,37 +65,49 @@ module LexisMinhash
       signature_size : Int32 = 100,
       num_bands : Int32 = 20,
       shingle_size : Int32 = 5,
+      min_words : Int32 = 4,
     ) : Nil
       @@mutex.synchronize do
         @@num_hashes = signature_size
         @@bands = num_bands
         @@rows = signature_size // num_bands
         @@shingle_size = shingle_size
+        @@min_words = min_words
         @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
         @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
         @@initialized = true
       end
     end
 
-    def self.config : {Int32, Int32, Int32, Int32}
+    def self.config : {Int32, Int32, Int32, Int32, Int32}
       ensure_initialized
       @@mutex.synchronize do
-        {@@num_hashes, @@bands, @@rows, @@shingle_size}
+        {@@num_hashes, @@bands, @@rows, @@shingle_size, @@min_words}
       end
     end
 
     # Compute signature using rolling hash + multiply-shift
     # Returns Array(UInt32) for backward compatibility
     def self.compute_signature(text : String) : Array(UInt32)
-      num_hashes, _, _, shingle_size = config
+      num_hashes, _, _, shingle_size, min_words = config
+
+      # Normalize to lowercase for case-insensitive matching
+      normalized = text.downcase.strip
 
       # Return zeros for empty or too-short strings (backward compatibility)
-      return Array(UInt32).new(num_hashes, 0_u32) if text.size < shingle_size
+      return Array(UInt32).new(num_hashes, 0_u32) if normalized.empty?
+
+      # Return zeros if word count is below minimum
+      word_count = normalized.split(/\s+/).size
+      return Array(UInt32).new(num_hashes, 0_u32) if word_count < min_words
+
+      # Return zeros if text is shorter than shingle size
+      return Array(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
 
-      text.each_byte do |byte|
+      normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           update_signature(signature, h64)
         end
@@ -104,15 +118,25 @@ module LexisMinhash
 
     # Compute signature as Slice(UInt32) for performance-critical code
     def self.compute_signature_slice(text : String) : Slice(UInt32)
-      num_hashes, _, _, shingle_size = config
+      num_hashes, _, _, shingle_size, min_words = config
+
+      # Normalize to lowercase for case-insensitive matching
+      normalized = text.downcase.strip
 
       # Return zeros for empty or too-short strings (backward compatibility)
-      return Slice(UInt32).new(num_hashes, 0_u32) if text.size < shingle_size
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
+
+      # Return zeros if word count is below minimum
+      word_count = normalized.split(/\s+/).size
+      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
+
+      # Return zeros if text is shorter than shingle size
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
 
-      text.each_byte do |byte|
+      normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           update_signature(signature, h64)
         end
