@@ -34,12 +34,13 @@ module LexisMinhash
   # MinHash engine using rolling hash + multiply-shift
   # O(n) shingling with no intermediate string allocations
   module Engine
-    @@a : Slice(UInt64) = Slice(UInt64).new(100)
-    @@b : Slice(UInt64) = Slice(UInt64).new(100)
+    @@a : Slice(UInt64) = Slice(UInt64).new(0)
+    @@b : Slice(UInt64) = Slice(UInt64).new(0)
     @@num_hashes : Int32 = 100
     @@bands : Int32 = 20
     @@rows : Int32 = 5
     @@shingle_size : Int32 = 5
+    @@initialized = false
     @@mutex = Mutex.new
 
     # Default configuration constants
@@ -47,6 +48,16 @@ module LexisMinhash
     NUM_BANDS      =  20
     ROWS_PER_BAND  =   5
     SHINGLE_SIZE   =   5
+
+    private def self.ensure_initialized
+      return if @@initialized
+      @@mutex.synchronize do
+        return if @@initialized
+        @@a = Slice(UInt64).new(@@num_hashes) { Random::Secure.rand(UInt64) | 1 }
+        @@b = Slice(UInt64).new(@@num_hashes) { Random::Secure.rand(UInt64) }
+        @@initialized = true
+      end
+    end
 
     def self.configure(
       signature_size : Int32 = 100,
@@ -60,10 +71,12 @@ module LexisMinhash
         @@shingle_size = shingle_size
         @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
         @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
+        @@initialized = true
       end
     end
 
     def self.config : {Int32, Int32, Int32, Int32}
+      ensure_initialized
       @@mutex.synchronize do
         {@@num_hashes, @@bands, @@rows, @@shingle_size}
       end
