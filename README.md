@@ -149,6 +149,24 @@ For 100 hashes targeting 0.75 similarity:
 
 Default (20 bands, 5 rows) gives 99.56% detection at 0.75 similarity.
 
+### Important: Randomized Hashing
+
+MinHash uses randomized hash functions. This means:
+
+- **Absolute similarity values vary between runs** - The same two documents may get slightly different similarity scores each time the program starts
+- **Use relative comparisons in tests** - Prefer `similarity(a, b) > similarity(a, c)` over `similarity(a, b) > 0.5`
+- **Deterministic within a run** - Once initialized, the same text always produces the same signature
+
+```crystal
+# Good for tests - relative comparison
+sim_similar = Engine.similarity(sig1, sig2)
+sim_different = Engine.similarity(sig1, sig3)
+sim_similar.should be > sim_different
+
+# Brittle in tests - absolute threshold
+Engine.similarity(sig1, sig2).should be > 0.3  # May fail due to randomization
+```
+
 Run benchmarks: `crystal run benchmark/benchmark.cr --release`
 
 ## API Reference
