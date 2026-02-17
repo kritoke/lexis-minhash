@@ -98,7 +98,8 @@ sig = LexisMinhash::Engine.compute_signature(doc)
 LexisMinhash::Engine.configure(
   signature_size: 100,  # Number of hash functions
   num_bands: 20,        # Number of bands for LSH
-  shingle_size: 5       # Character shingle size
+  shingle_size: 5,      # Character shingle size
+  min_words: 4          # Minimum words to produce signature (below = zeros)
 )
 ```
 
@@ -107,6 +108,23 @@ Default values:
 - `num_bands`: 20
 - `rows_per_band`: 5 (calculated as signature_size / num_bands)
 - `shingle_size`: 5
+- `min_words`: 4 (texts with fewer words return zero signature)
+
+### Minimum Words Threshold
+
+Texts with fewer than `min_words` return a zero signature:
+
+```crystal
+LexisMinhash::Engine.compute_signature("Short")        # => [0, 0, 0, ...] (1 word)
+LexisMinhash::Engine.compute_signature("Hello world")  # => [0, 0, 0, ...] (2 words)
+LexisMinhash::Engine.compute_signature("Bitcoin price surge continues")  # => [...] (4 words, produces signature)
+```
+
+This prevents clustering meaningless short headlines. Adjust based on your use case:
+
+```crystal
+LexisMinhash::Engine.configure(min_words: 6)  # Stricter filtering
+```
 
 ## Performance
 
