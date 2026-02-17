@@ -2,7 +2,7 @@ name: lexis-minhash
 version: 0.1.0
 
 authors:
-  - Your Name <your.email@example.com>
+  - kritoke <3081486+kritoke@users.noreply.github.com>
 
 description: |
   Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It provides efficient clustering of similar documents by generating hash signatures and using banding techniques for fast similarity search.

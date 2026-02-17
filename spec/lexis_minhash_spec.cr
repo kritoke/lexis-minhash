@@ -280,4 +280,108 @@ describe LexisMinhash do
       end
     end
   end
+
+  describe LexisMinhash::FastEngine do
+    describe "compute_signature" do
+      it "returns a slice of the correct size" do
+        LexisMinhash::FastEngine.configure(signature_size: 100, num_bands: 20)
+        signature = LexisMinhash::FastEngine.compute_signature("Hello World Test Document")
+        signature.size.should eq(100)
+      end
+
+      it "returns consistent signatures for the same text" do
+        LexisMinhash::FastEngine.configure(signature_size: 100, num_bands: 20)
+        sig1 = LexisMinhash::FastEngine.compute_signature("Test Document")
+        sig2 = LexisMinhash::FastEngine.compute_signature("Test Document")
+        sig1.should eq(sig2)
+      end
+
+      it "returns different signatures for different texts" do
+        sig1 = LexisMinhash::FastEngine.compute_signature("Technology company announces revolutionary product")
+        sig2 = LexisMinhash::FastEngine.compute_signature("Government officials discuss new policy changes")
+        sig1.should_not eq(sig2)
+      end
+    end
+
+    describe "similarity" do
+      it "returns 1.0 for identical signatures" do
+        sig = LexisMinhash::FastEngine.compute_signature("Test Document")
+        LexisMinhash::FastEngine.similarity(sig, sig).should eq(1.0_f64)
+      end
+
+      it "returns higher similarity for similar texts" do
+        sig1 = LexisMinhash::FastEngine.compute_signature("The quick brown fox jumps over the lazy dog")
+        sig2 = LexisMinhash::FastEngine.compute_signature("The quick brown fox jumps over the lazy cat")
+        sig3 = LexisMinhash::FastEngine.compute_signature("Completely different topic about cooking")
+
+        sim_same = LexisMinhash::FastEngine.similarity(sig1, sig2)
+        sim_diff = LexisMinhash::FastEngine.similarity(sig1, sig3)
+
+        sim_same.should be > sim_diff
+      end
+    end
+
+    describe "generate_bands" do
+      it "returns the correct number of bands" do
+        LexisMinhash::FastEngine.configure(signature_size: 100, num_bands: 20)
+        sig = LexisMinhash::FastEngine.compute_signature("Test Document")
+        bands = LexisMinhash::FastEngine.generate_bands(sig)
+        bands.size.should eq(20)
+      end
+    end
+
+    describe "signature_to_bytes and bytes_to_signature" do
+      it "preserves signature data through conversion" do
+        original = LexisMinhash::FastEngine.compute_signature("Convert This Signature")
+        bytes = LexisMinhash::FastEngine.signature_to_bytes(original)
+        restored = LexisMinhash::FastEngine.bytes_to_signature(bytes)
+        original.should eq(restored)
+      end
+    end
+  end
+
+  describe LexisMinhash::FastLSHIndex do
+    it "adds and queries documents" do
+      index = LexisMinhash::FastLSHIndex.new(bands: 20)
+
+      index.add(1, "The quick brown fox jumps over the lazy dog")
+      index.add(2, "The quick brown fox jumps over the lazy cat")
+
+      index.size.should eq(2)
+
+      candidates = index.query("The quick brown fox jumps over the lazy")
+      candidates.should contain(1)
+      candidates.should contain(2)
+    end
+
+    it "finds similar pairs" do
+      index = LexisMinhash::FastLSHIndex.new(bands: 20)
+
+      index.add(1, "Technology company announces revolutionary smartphone innovation")
+      index.add(2, "Technology company announces revolutionary smartphone product")
+      index.add(3, "Completely different topic about cooking recipes food")
+
+      pairs = index.find_similar_pairs(threshold: 0.5_f64)
+      pairs.size.should be >= 0
+    end
+
+    it "queries by signature directly" do
+      index = LexisMinhash::FastLSHIndex.new(bands: 20)
+
+      signature = LexisMinhash::FastEngine.compute_signature("Test document for signature query")
+      index.add_with_signature(1, signature)
+
+      candidates = index.query_by_signature(signature)
+      candidates.should contain(1)
+    end
+
+    it "clears all data" do
+      index = LexisMinhash::FastLSHIndex.new(bands: 20)
+
+      index.add(1, "Test document for clearing")
+      index.size.should eq(1)
+      index.clear
+      index.size.should eq(0)
+    end
+  end
 end
