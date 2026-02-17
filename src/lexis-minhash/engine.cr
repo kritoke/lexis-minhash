@@ -73,6 +73,10 @@ module LexisMinhash
     # Returns Array(UInt32) for backward compatibility
     def self.compute_signature(text : String) : Array(UInt32)
       num_hashes, _, _, shingle_size = config
+
+      # Return zeros for empty or too-short strings (backward compatibility)
+      return Array(UInt32).new(num_hashes, 0_u32) if text.size < shingle_size
+
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
 
@@ -88,6 +92,10 @@ module LexisMinhash
     # Compute signature as Slice(UInt32) for performance-critical code
     def self.compute_signature_slice(text : String) : Slice(UInt32)
       num_hashes, _, _, shingle_size = config
+
+      # Return zeros for empty or too-short strings (backward compatibility)
+      return Slice(UInt32).new(num_hashes, 0_u32) if text.size < shingle_size
+
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
 
