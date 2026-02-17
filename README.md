@@ -121,6 +121,31 @@ LSH allows for efficient approximate nearest neighbor search in high-dimensional
 2. Hash-based indexing of bands
 3. Fast candidate pair generation
 
+## Performance
+
+FastEngine uses rolling hash + multiply-shift instead of SHA256:
+
+```
+Engine.compute_signature    42.14  (23.73ms)   44.10× slower
+FastEngine.compute_signature 1.86k (538.12µs)       fastest
+```
+
+**FastEngine is ~44x faster** than the SHA256-based Engine.
+
+### LSH Parameter Tuning
+
+For 100 hashes targeting 0.75 similarity:
+
+| Bands (b) | Rows (r) | Threshold | Prob @ Target |
+|-----------|----------|-----------|---------------|
+| 10        | 10       | 0.794     | 43.99%        |
+| 20        | 5        | 0.549     | 99.56%        |
+| 25        | 4        | 0.447     | 99.99%        |
+
+Default (20 bands, 5 rows) gives 99.56% detection at 0.75 similarity.
+
+Run benchmarks: `crystal run benchmark/benchmark.cr --release`
+
 ## LSH Index
 
 The `LSHIndex` class provides an in-memory index for efficient similarity queries:
