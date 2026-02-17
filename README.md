@@ -113,8 +113,11 @@ Default values:
 Using rolling hash + multiply-shift:
 
 ```
-Engine.compute_signature   1.95k (512µs)  2.66kB/op
+compute_signature (Array)       528µs  5.0kB/op
+compute_signature_slice         512µs  2.66kB/op  (recommended)
 ```
+
+**Note:** Default methods return `Array(UInt32)` for backward compatibility (~3% slower, 2x memory). Use `compute_signature_slice` and `bytes_to_signature_slice` for maximum performance.
 
 ### LSH Parameter Tuning
 
@@ -136,14 +139,15 @@ Run benchmarks: `crystal run benchmark/benchmark.cr --release`
 
 | Method | Description |
 |--------|-------------|
-| `compute_signature(text : String)` | Generate MinHash signature |
-| `compute_signature(doc : Document)` | Generate signature from Document interface |
+| `compute_signature(text : String)` | Generate MinHash signature → `Array(UInt32)` |
+| `compute_signature(doc : Document)` | Generate from Document interface → `Array(UInt32)` |
+| `compute_signature_slice(text)` | Generate signature → `Slice(UInt32)` (faster) |
 | `similarity(sig1, sig2)` | Compare two signatures (0.0 to 1.0) |
-| `generate_bands(signature)` | Generate LSH bands, returns `Array({Int32, UInt64})` |
+| `generate_bands(signature)` | Generate LSH bands → `Array({Int32, UInt64})` |
 | `detection_probability(similarity)` | Probability of detecting items at given similarity |
 | `signature_to_bytes(signature)` | Convert signature to bytes for storage |
-| `bytes_to_signature(bytes)` | Convert bytes back to `Slice(UInt32)` |
-| `bytes_to_signature_array(bytes)` | Convert bytes back to `Array(UInt32)` (compat) |
+| `bytes_to_signature(bytes)` | Convert bytes → `Array(UInt32)` |
+| `bytes_to_signature_slice(bytes)` | Convert bytes → `Slice(UInt32)` (faster) |
 
 ### LSHIndex Methods
 
