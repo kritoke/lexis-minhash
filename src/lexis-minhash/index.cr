@@ -1,4 +1,77 @@
 module LexisMinhash
+  # Linear probing bucket table for cache-efficient LSH storage
+  struct BucketEntry
+    property key : UInt64
+    property doc_id : Int32
+
+    def initialize(@key : UInt64, @doc_id : Int32)
+    end
+  end
+
+  class LinearBucketTable
+    @data : Slice(BucketEntry)
+    @occupied : Slice(Bool)
+    @count : Int32 = 0
+
+    # Capacity should be ~2x expected entries for good performance
+    def initialize(capacity : Int32)
+      @data = Slice(BucketEntry).new(capacity) { BucketEntry.new(0_u64, 0) }
+      @occupied = Slice(Bool).new(capacity, false)
+    end
+
+    def insert(key : UInt64, doc_id : Int32) : Nil
+      return if @count >= @data.size
+
+      idx = (key % @data.size.to_u64).to_i32
+
+      # Linear probing: find empty slot or duplicate
+      while @occupied[idx]
+        # Skip if already exists
+        return if @data[idx].key == key && @data[idx].doc_id == doc_id
+        idx = (idx + 1) % @data.size
+      end
+
+      @data[idx] = BucketEntry.new(key, doc_id)
+      @occupied[idx] = true
+      @count += 1
+    end
+
+    def find_candidates(key : UInt64, &) : Nil
+      return if @count == 0
+
+      idx = (key % @data.size.to_u64).to_i32
+      start_idx = idx
+
+      # Scan cluster until we hit an empty slot
+      while @occupied[idx]
+        if @data[idx].key == key
+          yield @data[idx].doc_id
+        end
+        idx = (idx + 1) % @data.size
+
+        # Safety: don't loop forever if table is full
+        break if idx == start_idx
+      end
+    end
+
+    def clear : Nil
+      @occupied.fill(false)
+      @count = 0
+    end
+
+    def size : Int32
+      @count
+    end
+
+    def capacity : Int32
+      @data.size
+    end
+
+    def load_factor : Float64
+      @count.to_f64 / @data.size.to_f64
+    end
+  end
+
   # In-memory LSH index for efficient candidate retrieval
   class LSHIndex
     @buckets : Hash(UInt64, Set(String))
@@ -87,16 +160,20 @@ module LexisMinhash
     end
   end
 
-  # Fast LSH index using Int32 doc IDs and optimized storage
+  # Fast LSH index using Int32 doc IDs and linear probing storage
   class FastLSHIndex
     @signatures : Hash(Int32, Slice(UInt32))
-    @tables : Array(Hash(UInt64, Array(Int32)))
+    @tables : Array(LinearBucketTable)
     @bands : Int32
     @rows : Int32
 
-    def initialize(bands : Int32 = 20)
+    # Initialize with expected number of documents for capacity planning
+    # Table capacity is ~2x expected docs per band for good load factor
+    def initialize(bands : Int32 = 20, expected_docs : Int32 = 1000)
       @signatures = Hash(Int32, Slice(UInt32)).new
-      @tables = Array.new(bands) { Hash(UInt64, Array(Int32)).new }
+      # Each band gets a table with ~2x expected entries
+      table_capacity = expected_docs * 2
+      @tables = Array.new(bands) { LinearBucketTable.new(table_capacity) }
       @bands = bands
       @rows = 5
     end
@@ -107,7 +184,7 @@ module LexisMinhash
 
       band_hashes = FastEngine.generate_bands(signature)
       band_hashes.each_with_index do |band_hash, band_idx|
-        (@tables[band_idx][band_hash] ||= [] of Int32) << doc_id
+        @tables[band_idx].insert(band_hash, doc_id)
       end
     end
 
@@ -116,7 +193,7 @@ module LexisMinhash
 
       band_hashes = FastEngine.generate_bands(signature)
       band_hashes.each_with_index do |band_hash, band_idx|
-        (@tables[band_idx][band_hash] ||= [] of Int32) << doc_id
+        @tables[band_idx].insert(band_hash, doc_id)
       end
     end
 
@@ -130,8 +207,8 @@ module LexisMinhash
 
       band_hashes = FastEngine.generate_bands(signature)
       band_hashes.each_with_index do |band_hash, band_idx|
-        if matches = @tables[band_idx][band_hash]?
-          matches.each { |id| candidates << id }
+        @tables[band_idx].find_candidates(band_hash) do |doc_id|
+          candidates << doc_id
         end
       end
 
@@ -183,6 +260,11 @@ module LexisMinhash
 
     def size : Int32
       @signatures.size
+    end
+
+    # Returns load factors for each band's table
+    def load_factors : Array(Float64)
+      @tables.map(&.load_factor)
     end
 
     def clear : Nil

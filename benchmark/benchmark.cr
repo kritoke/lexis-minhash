@@ -10,14 +10,14 @@ def print_lsh_tuning(target_threshold : Float64, num_hashes : Int32)
   puts "-" * 60
   printf("%-10s | %-10s | %-10s | %-15s\n", "Bands (b)", "Rows (r)", "Threshold", "Prob @ Target")
 
-  (1..num_hashes).each do |b|
-    next unless num_hashes % b == 0
-    r = num_hashes // b
+  (1..num_hashes).each do |band_count|
+    next unless num_hashes % band_count == 0
+    row_count = num_hashes // band_count
 
-    calc_threshold = (1.0 / b)**(1.0 / r)
-    prob_at_target = probability_of_collision(target_threshold, b, r)
+    calc_threshold = (1.0 / band_count)**(1.0 / row_count)
+    prob_at_target = probability_of_collision(target_threshold, band_count, row_count)
 
-    printf("%-10d | %-10d | %-10.3f | %-15.2f%%\n", b, r, calc_threshold, prob_at_target * 100)
+    printf("%-10d | %-10d | %-10.3f | %-15.2f%%\n", band_count, row_count, calc_threshold, prob_at_target * 100)
   end
 end
 
@@ -55,15 +55,31 @@ puts
 puts "=== LSH Index Benchmark ==="
 puts
 
-index = LexisMinhash::FastLSHIndex.new(bands: 20)
-sample_texts.each_with_index { |text, i| index.add(i, text) }
+# Test with larger dataset
+test_docs = [] of String
+100.times do |i|
+  test_docs << "Document number #{i} with some unique content about technology"
+end
+
+# Using LinearBucketTable (FastLSHIndex)
+fast_index = LexisMinhash::FastLSHIndex.new(bands: 20, expected_docs: 100)
+test_docs.each_with_index { |text, i| fast_index.add(i, text) }
 
 Benchmark.ips do |x|
+  x.report("FastLSHIndex.add (100 docs)") do
+    idx = LexisMinhash::FastLSHIndex.new(bands: 20, expected_docs: 100)
+    test_docs.each_with_index { |text, i| idx.add(i, text) }
+  end
+
   x.report("FastLSHIndex.query") do
-    sample_texts.each { |text| index.query(text) }
+    test_docs.each { |text| fast_index.query(text) }
   end
 
   x.report("FastLSHIndex.find_similar_pairs") do
-    index.find_similar_pairs(threshold: 0.75)
+    fast_index.find_similar_pairs(threshold: 0.75)
   end
 end
+
+puts
+puts "=== Load Factors ==="
+puts "FastLSHIndex load factors per band: #{fast_index.load_factors.map(&.round(3))}"
