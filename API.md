@@ -5,10 +5,11 @@ This guide covers advanced patterns and recommendations for using lexis-minhash 
 ## Table of Contents
 
 1. [Weighting Strategies](#weighting-strategies)
-2. [Text Preprocessing](#text-preprocessing)
-3. [Performance Optimization](#performance-optimization)
-4. [Custom Similarity Functions](#custom-similarity-functions)
-5. [Common Patterns](#common-patterns)
+2. [LSH Tuning for Different Use Cases](#lsh-tuning-for-different-use-cases)
+3. [Text Preprocessing](#text-preprocessing)
+4. [Performance Optimization](#performance-optimization)
+5. [Custom Similarity Functions](#custom-similarity-functions)
+6. [Common Patterns](#common-patterns)
 
 ---
 
@@ -67,6 +68,55 @@ def bm25_weight(
   idf * (numerator / denominator)
 end
 ```
+
+---
+
+## LSH Tuning for Different Use Cases
+
+### MinHash + Jaccard vs. Overlap Coefficient
+
+MinHash is mathematically tied to **Jaccard Similarity** (|A ∩ B| / |A ∪ B|). If you're using **Weighted Overlap Coefficient** for final ranking, you may encounter cases where the "Best" overlap match has low Jaccard but high Overlap.
+
+**Example:**
+- Title A: "Matrix"
+- Title B: "The Ultimate Matrix 4K Collection"
+- Overlap Coefficient: 1.0 (A is subset of B)
+- Jaccard: ~0.2 (low)
+
+MinHash estimates Jaccard, so this pair might not be found as candidates.
+
+### Solution: Lower Rows Per Band
+
+Reduce the number of rows per band to lower the LSH threshold:
+
+```crystal
+# Default: 20 bands, 5 rows = threshold ~0.55
+LexisMinhash::Engine.configure(signature_size: 100, num_bands: 20)
+
+# For subset/overlap use cases: 50 bands, 2 rows = threshold ~0.14
+LexisMinhash::Engine.configure(signature_size: 100, num_bands: 50)
+```
+
+**Threshold Reference (100 hashes):**
+
+| Bands | Rows | Threshold | Best For |
+|-------|------|-----------|----------|
+| 20    | 5    | 0.55      | Standard Jaccard |
+| 50    | 2    | 0.14      | Subset/Overlap detection |
+| 100   | 1    | 0.01      | Maximum recall |
+
+### Weight Precision
+
+The library uses log-transform for weights < 1.0 to prevent precision loss:
+
+```crystal
+# Small weights (TF-IDF) are log-transformed internally
+weight = 0.001  # log(1.001) ≈ 0.001
+# vs
+weight = 2.0    # used directly
+```
+
+This ensures rare terms reliably "win" min-hash slots.
 
 ---
 

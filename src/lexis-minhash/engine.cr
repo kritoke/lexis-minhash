@@ -252,7 +252,8 @@ module LexisMinhash
 
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
-        weighted_value = combined_h.to_f64 / effective_weight
+        effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
+        weighted_value = combined_h.to_f64 / effective_value
         weighted_h = (weighted_value % Float64.new(UInt32::MAX)).to_u32
         signature[i] = weighted_h if weighted_h < signature[i]
       end
