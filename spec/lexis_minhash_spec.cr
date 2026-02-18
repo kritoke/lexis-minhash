@@ -41,6 +41,45 @@ describe LexisMinhash::Engine do
     end
   end
 
+  describe "overlap_coefficient" do
+    it "returns 0.0 for empty arrays" do
+      a = Slice(UInt64).new(0)
+      b = Slice(UInt64).new(1, 1_u64)
+      LexisMinhash::Engine.overlap_coefficient(a, b).should eq(0.0)
+
+      a = Slice(UInt64).new(1, 1_u64)
+      b = Slice(UInt64).new(0)
+      LexisMinhash::Engine.overlap_coefficient(a, b).should eq(0.0)
+    end
+
+    it "returns 1.0 for identical sorted arrays" do
+      a = Slice.new(3) { |i| (i + 1).to_u64 }
+      b = Slice.new(3) { |i| (i + 1).to_u64 }
+      LexisMinhash::Engine.overlap_coefficient(a, b).should eq(1.0)
+    end
+
+    it "returns correct coefficient for partial overlap" do
+      a = Slice.new(4) { |i| (i + 1).to_u64 }
+      b = Slice.new(4) { |i| (i + 3).to_u64 }
+      result = LexisMinhash::Engine.overlap_coefficient(a, b)
+      result.should eq(0.5)
+    end
+
+    it "returns 0.0 for disjoint arrays" do
+      a = Slice.new(3) { |i| (i + 1).to_u64 }
+      b = Slice.new(3) { |i| (i + 10).to_u64 }
+      LexisMinhash::Engine.overlap_coefficient(a, b).should eq(0.0)
+    end
+
+    it "uses min size in denominator" do
+      a = Slice.new(5) { |i| (i + 1).to_u64 }
+      b = Slice.new(3) { |i| (i + 3).to_u64 }
+      b[2] = 6_u64
+      result = LexisMinhash::Engine.overlap_coefficient(a, b)
+      result.should eq(0.6666666666666666)
+    end
+  end
+
   describe "generate_bands" do
     it "returns the correct number of bands" do
       LexisMinhash::Engine.configure(signature_size: 100, num_bands: 20)

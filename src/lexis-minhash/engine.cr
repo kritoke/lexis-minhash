@@ -157,7 +157,7 @@ module LexisMinhash
     end
 
     # Compute similarity between two signatures (Array or Slice)
-    def self.similarity(sig1 : Array(UInt32), sig2 : Array(UInt32)) : Float64
+    def self.similarity(sig1 : Array(UInt32) | Slice(UInt32), sig2 : Array(UInt32) | Slice(UInt32)) : Float64
       return 0.0_f64 if sig1.empty? || sig2.empty?
       return 0.0_f64 if sig1.size != sig2.size
 
@@ -169,16 +169,48 @@ module LexisMinhash
       matches.to_f64 / sig1.size.to_f64
     end
 
-    def self.similarity(sig1 : Slice(UInt32), sig2 : Slice(UInt32)) : Float64
-      return 0.0_f64 if sig1.empty? || sig2.empty?
-      return 0.0_f64 if sig1.size != sig2.size
+    def self.overlap_coefficient(a : Slice(UInt64), b : Slice(UInt64)) : Float64
+      return 0.0 if a.empty? || b.empty?
 
-      matches = 0
-      sig1.size.times do |i|
-        matches += 1 if sig1[i] == sig2[i]
+      intersection = 0
+      i = 0
+      j = 0
+
+      while i < a.size && j < b.size
+        if a[i] == b[j]
+          intersection += 1
+          i += 1
+          j += 1
+        elsif a[i] < b[j]
+          i += 1
+        else
+          j += 1
+        end
       end
 
-      matches.to_f64 / sig1.size.to_f64
+      intersection.to_f / {a.size, b.size}.min
+    end
+
+    def self.overlap_coefficient(a : Slice(UInt32), b : Slice(UInt32)) : Float64
+      return 0.0 if a.empty? || b.empty?
+
+      intersection = 0
+      i = 0
+      j = 0
+
+      while i < a.size && j < b.size
+        if a[i] == b[j]
+          intersection += 1
+          i += 1
+          j += 1
+        elsif a[i] < b[j]
+          i += 1
+        else
+          j += 1
+        end
+      end
+
+      intersection.to_f / {a.size, b.size}.min
     end
 
     # Generate LSH bands from signature (Array or Slice)
@@ -203,7 +235,9 @@ module LexisMinhash
 
       bands.times do |band_idx|
         band_slice = signature[band_idx * rows, rows]
-        band_hashes << {band_idx, band_slice.hash.to_u64}
+        combined = 0_u64
+        band_slice.each { |_hash| combined = (combined << 7) ^ _hash }
+        band_hashes << {band_idx, combined}
       end
 
       band_hashes
@@ -218,18 +252,7 @@ module LexisMinhash
     end
 
     # Convert Slice(UInt32) or Array(UInt32) to Bytes for storage
-    def self.signature_to_bytes(signature : Slice(UInt32)) : Bytes
-      bytes = Bytes.new(signature.size * sizeof(UInt32))
-      signature.each_with_index do |val, idx|
-        bytes[idx * sizeof(UInt32) + 0] = (val & 0xFF).to_u8
-        bytes[idx * sizeof(UInt32) + 1] = ((val >> 8) & 0xFF).to_u8
-        bytes[idx * sizeof(UInt32) + 2] = ((val >> 16) & 0xFF).to_u8
-        bytes[idx * sizeof(UInt32) + 3] = ((val >> 24) & 0xFF).to_u8
-      end
-      bytes
-    end
-
-    def self.signature_to_bytes(signature : Array(UInt32)) : Bytes
+    def self.signature_to_bytes(signature : Array(UInt32) | Slice(UInt32)) : Bytes
       bytes = Bytes.new(signature.size * sizeof(UInt32))
       signature.each_with_index do |val, idx|
         bytes[idx * sizeof(UInt32) + 0] = (val & 0xFF).to_u8

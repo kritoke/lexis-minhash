@@ -6,6 +6,7 @@ Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting simila
 
 - **O(n) MinHash Signatures**: Rolling hash + multiply-shift, no intermediate string allocations
 - **Signature Similarity**: Fast approximate Jaccard similarity estimation
+- **Overlap Coefficient**: Measure set similarity using |A ∩ B| / min(|A|, |B|)
 - **Locality-Sensitive Hashing (LSH)**: Efficient candidate retrieval using banding
 - **LSH Index**: In-memory index with linear probing for cache-efficient storage
 - **Thread-Safe**: Mutex-protected configuration
@@ -42,6 +43,22 @@ puts "Similarity: #{similarity}"
 # Generate LSH bands for candidate detection
 bands = LexisMinhash::Engine.generate_bands(sig1)
 # bands is Array({Int32, UInt64}) with {band_index, band_hash} tuples
+```
+
+### Overlap Coefficient
+
+The overlap coefficient measures set similarity as `|A ∩ B| / min(|A|, |B|)`. Unlike Jaccard similarity (|A ∩ B| / |A ∪ B|), it's better at detecting partial overlaps when one set is a subset of another.
+
+```crystal
+# Works with sorted UInt32 or UInt64 slices
+a = Slice.new(5) { |i| (i * 2).to_u32 }  # [0, 2, 4, 6, 8]
+b = Slice.new(3) { |i| (i * 2 + 2).to_u32 }  # [2, 4, 6]
+
+# Intersection: [2, 4, 6] = 3 elements
+# min(5, 3) = 3
+# Overlap coefficient = 3/3 = 1.0
+coefficient = LexisMinhash::Engine.overlap_coefficient(a, b)
+puts "Overlap: #{coefficient}"  # => 1.0
 ```
 
 ### Using LSHIndex
@@ -179,6 +196,7 @@ Run benchmarks: `crystal run benchmark/benchmark.cr --release`
 | `compute_signature(doc : Document)` | Generate from Document interface → `Array(UInt32)` |
 | `compute_signature_slice(text)` | Generate signature → `Slice(UInt32)` (faster) |
 | `similarity(sig1, sig2)` | Compare two signatures (0.0 to 1.0) |
+| `overlap_coefficient(a, b)` | Overlap coefficient: \|A ∩ B\| / min(\|A\|, \|B\|) |
 | `generate_bands(signature)` | Generate LSH bands → `Array({Int32, UInt64})` |
 | `detection_probability(similarity)` | Probability of detecting items at given similarity |
 | `signature_to_bytes(signature)` | Convert signature to bytes for storage |
