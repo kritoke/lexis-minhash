@@ -38,6 +38,53 @@ module LexisMinhash
     end
   end
 
+  # MinHash signature wrapper providing convenient serialization and similarity
+  #
+  # ```
+  # sig = LexisMinhash::Signature.compute("Document text")
+  # bytes = sig.to_blob
+  # sig2 = LexisMinhash::Signature.from_blob(bytes)
+  # sim = sig.similarity(sig2)
+  # ```
+  struct Signature
+    getter data : Slice(UInt32)
+
+    def initialize(@data : Slice(UInt32))
+    end
+
+    def self.compute(text : String) : Signature
+      Signature.new(Engine.compute_signature_slice(text))
+    end
+
+    def self.compute(text : String, weights : Hash(String, Float64)?) : Signature
+      Signature.new(Engine.compute_signature_slice(text, weights))
+    end
+
+    def to_blob : Bytes
+      slice = @data
+      bytes = Bytes.new(slice.size * sizeof(UInt32))
+      slice.to_unsafe.copy_to(bytes.to_unsafe, bytes.size)
+      bytes
+    end
+
+    def self.from_blob(blob : Bytes) : Signature
+      return Signature.new(Slice(UInt32).new(0)) if blob.empty?
+
+      count = blob.size // sizeof(UInt32)
+      slice = Slice(UInt32).new(count)
+      blob.copy_to(slice.to_unsafe, blob.size)
+      Signature.new(slice)
+    end
+
+    def similarity(other : Signature) : Float64
+      Engine.similarity(@data, other.data)
+    end
+
+    def size : Int32
+      @data.size
+    end
+  end
+
   # MinHash engine using rolling hash + multiply-shift
   # O(n) shingling with no intermediate string allocations
   module Engine
@@ -78,15 +125,21 @@ module LexisMinhash
     #   num_bands: 20,       # Number of LSH bands
     #   shingle_size: 5,     # Character n-gram size (k-shingles)
     #   min_words: 4,        # Minimum words for valid signature
-    #   default_weight: 1.0  # Default weight for unknown shingles in weighted MinHash
+    #   default_weight: 1.0, # Default weight for unknown shingles in weighted MinHash
+    #   seed: 12345          # Optional seed for reproducible hashes
     # )
     # ```
+    #
+    # **Seed Parameter**: When provided, uses a deterministic PRNG (PCG) to generate
+    # hash coefficients. This ensures signatures are consistent across application restarts.
+    # Omit or set to `nil` for random (secure) coefficients on each run.
     def self.configure(
       signature_size : Int32 = 100,
       num_bands : Int32 = 20,
       shingle_size : Int32 = 5,
       min_words : Int32 = 4,
       default_weight : Float64 = 1.0_f64,
+      seed : Int64? = nil,
     ) : Nil
       @@mutex.synchronize do
         @@num_hashes = signature_size
@@ -95,8 +148,21 @@ module LexisMinhash
         @@shingle_size = shingle_size
         @@min_words = min_words
         @@default_weight = default_weight
-        @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
-        @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
+
+        if seed
+          seed_u64 = seed.to_u64
+          a_arr = [] of UInt64
+          b_arr = [] of UInt64
+          signature_size.times do |i|
+            a_arr << (((seed_u64 &* 6364136223846793005 &+ 1442695040888963407) &+ i.to_u64) | 1)
+            b_arr << ((seed_u64 &* 6364136223846793005 &+ 1442695040888963407) &+ i.to_u64)
+          end
+          @@a = Slice.new(a_arr.to_unsafe, signature_size)
+          @@b = Slice.new(b_arr.to_unsafe, signature_size)
+        else
+          @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
+          @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
+        end
         @@initialized = true
       end
     end

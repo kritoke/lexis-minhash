@@ -116,7 +116,49 @@ weight = 0.001  # log(1.001) ≈ 0.001
 weight = 2.0    # used directly
 ```
 
-This ensures rare terms reliably "win" min-hash slots.
+### Reproducible Hashes
+
+For consistent signatures across application restarts, use a seed:
+
+```crystal
+# Set a seed for deterministic hashing
+LexisMinhash::Engine.configure(
+  signature_size: 100,
+  seed: 12345  # Same seed = same signatures every run
+)
+
+# Now signatures are reproducible
+sig1 = LexisMinhash::Engine.compute_signature("Hello World")
+sig2 = LexisMinhash::Engine.compute_signature("Hello World")
+sig1.should eq(sig2)  # Always true with same seed
+```
+
+**Use cases:** Testing, caching, database storage where you need consistent lookups.
+
+---
+
+## Signature Struct
+
+The library provides a `Signature` struct for convenient serialization and similarity:
+
+```crystal
+# Create signature
+sig = LexisMinhash::Signature.compute("Document text")
+
+# Serialize to blob (for database storage)
+bytes = sig.to_blob
+
+# Deserialize from blob
+sig2 = LexisMinhash::Signature.from_blob(bytes)
+
+# Calculate similarity directly
+similarity = sig.similarity(sig2)
+```
+
+Benefits:
+- **to_blob**: Uses pointer casting for efficient binary serialization
+- **from_blob**: Fast deserialization from stored bytes
+- **similarity**: Direct method on Signature - no manual array extraction needed
 
 ---
 

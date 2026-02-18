@@ -29,6 +29,7 @@
 # - [API.md](./API.md) - Advanced usage patterns and recommendations
 require "deque"
 require "mutex"
+require "random"
 require "random/secure"
 require "set"
 
