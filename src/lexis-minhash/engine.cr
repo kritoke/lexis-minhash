@@ -48,15 +48,17 @@ module LexisMinhash
     @@rows : Int32 = 5
     @@shingle_size : Int32 = 5
     @@min_words : Int32 = 4
+    @@default_weight : Float64 = 1.0_f64
     @@initialized = false
     @@mutex = Mutex.new
 
     # Default configuration constants
-    SIGNATURE_SIZE = 100
-    NUM_BANDS      =  20
-    ROWS_PER_BAND  =   5
-    SHINGLE_SIZE   =   5
-    MIN_WORDS      =   4
+    SIGNATURE_SIZE =     100
+    NUM_BANDS      =      20
+    ROWS_PER_BAND  =       5
+    SHINGLE_SIZE   =       5
+    MIN_WORDS      =       4
+    DEFAULT_WEIGHT = 1.0_f64
 
     private def self.ensure_initialized
       return if @@initialized
@@ -68,11 +70,23 @@ module LexisMinhash
       end
     end
 
+    # Configures the MinHash engine parameters
+    #
+    # ```
+    # LexisMinhash::Engine.configure(
+    #   signature_size: 100, # Number of hash functions
+    #   num_bands: 20,       # Number of LSH bands
+    #   shingle_size: 5,     # Character n-gram size (k-shingles)
+    #   min_words: 4,        # Minimum words for valid signature
+    #   default_weight: 1.0  # Default weight for unknown shingles in weighted MinHash
+    # )
+    # ```
     def self.configure(
       signature_size : Int32 = 100,
       num_bands : Int32 = 20,
       shingle_size : Int32 = 5,
       min_words : Int32 = 4,
+      default_weight : Float64 = 1.0_f64,
     ) : Nil
       @@mutex.synchronize do
         @@num_hashes = signature_size
@@ -80,17 +94,23 @@ module LexisMinhash
         @@rows = signature_size // num_bands
         @@shingle_size = shingle_size
         @@min_words = min_words
+        @@default_weight = default_weight
         @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
         @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
         @@initialized = true
       end
     end
 
-    def self.config : {Int32, Int32, Int32, Int32, Int32}
+    def self.config : {Int32, Int32, Int32, Int32, Int32, Float64}
       ensure_initialized
       @@mutex.synchronize do
-        {@@num_hashes, @@bands, @@rows, @@shingle_size, @@min_words}
+        {@@num_hashes, @@bands, @@rows, @@shingle_size, @@min_words, @@default_weight}
       end
+    end
+
+    def self.default_weight : Float64
+      ensure_initialized
+      @@default_weight
     end
 
     # Compute signature using rolling hash + multiply-shift
@@ -163,6 +183,25 @@ module LexisMinhash
       end
     end
 
+    # Computes a MinHash signature with optional TF-IDF weights
+    #
+    # If weights are provided, uses weighted MinHash where higher weights
+    # (rare terms) have more influence on the signature.
+    #
+    # ```
+    # weights = {"hello" => 2.0_f64, "world" => 1.5_f64}
+    # sig = LexisMinhash::Engine.compute_signature("Hello World", weights)
+    # ```
+    #
+    # **Hash Key Matching**: Keys in the weights hash must match the shingles
+    # generated from the text. The library uses character n-grams (default: 5 chars)
+    # after converting text to lowercase. For example, "hello world" with shingle_size=5
+    # generates shingles: "hello", "ello ", "llo w", "lo wo", "o wor", " worl", "world"
+    #
+    # Unknown shingles use the configured default weight (default: 1.0).
+    # Set via `Engine.configure(default_weight: value)`.
+    #
+    # Negative weights are clamped to 0 (excluded from signature).
     def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
       if weights
         compute_signature_weighted(text, weights)
@@ -171,6 +210,11 @@ module LexisMinhash
       end
     end
 
+    # Computes a weighted MinHash signature
+    #
+    # Higher weights make terms more influential by dividing their hash values.
+    # This causes rare (high-weight) terms to produce smaller values that are
+    # more likely to "win" the minimum hash position.
     def self.compute_signature_weighted(text : String, weights : Hash(String, Float64)) : Array(UInt32)
       num_hashes, _, _, shingle_size, min_words = config
 
@@ -184,11 +228,12 @@ module LexisMinhash
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
+      def_weight = default_weight
 
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           if shingle_str = roller.current_shingle
-            weight = weights[shingle_str]? || 1.0_f64
+            weight = weights[shingle_str]? || def_weight
             update_signature_weighted(signature, h64, weight)
           end
         end
@@ -234,11 +279,12 @@ module LexisMinhash
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
+      def_weight = default_weight
 
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           if shingle_str = roller.current_shingle
-            weight = weights[shingle_str]? || 1.0_f64
+            weight = weights[shingle_str]? || def_weight
             update_signature_weighted(signature, h64, weight)
           end
         end
