@@ -29,6 +29,13 @@ module LexisMinhash
       @current_hash = 0_u64
       @buffer.clear
     end
+
+    def current_shingle : String?
+      return nil if @buffer.size < @window_size
+      String.build do |io|
+        @buffer.each { |byte| io.write_byte(byte) }
+      end
+    end
   end
 
   # MinHash engine using rolling hash + multiply-shift
@@ -154,6 +161,90 @@ module LexisMinhash
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
         signature[i] = combined_h if combined_h < signature[i]
       end
+    end
+
+    def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
+      if weights
+        compute_signature_weighted(text, weights)
+      else
+        compute_signature(text)
+      end
+    end
+
+    def self.compute_signature_weighted(text : String, weights : Hash(String, Float64)) : Array(UInt32)
+      num_hashes, _, _, shingle_size, min_words = config
+
+      normalized = text.downcase.strip
+      return Array(UInt32).new(num_hashes, 0_u32) if normalized.empty?
+
+      word_count = normalized.split(/\s+/).size
+      return Array(UInt32).new(num_hashes, 0_u32) if word_count < min_words
+
+      return Array(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
+
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      roller = ShingleRoller.new(shingle_size)
+
+      normalized.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          if shingle_str = roller.current_shingle
+            weight = weights[shingle_str]? || 1.0_f64
+            update_signature_weighted(signature, h64, weight)
+          end
+        end
+      end
+
+      signature.to_a
+    end
+
+    private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
+      num_hashes, _, _, _ = config
+      a = @@a
+      b = @@b
+
+      effective_weight = Math.max(weight, 0.0_f64)
+      return if effective_weight <= 0.0_f64
+
+      num_hashes.times do |i|
+        combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
+        weighted_value = combined_h.to_f64 / effective_weight
+        weighted_h = (weighted_value % Float64.new(UInt32::MAX)).to_u32
+        signature[i] = weighted_h if weighted_h < signature[i]
+      end
+    end
+
+    def self.compute_signature_slice(text : String, weights : Hash(String, Float64)?) : Slice(UInt32)
+      if weights
+        compute_signature_slice_weighted(text, weights)
+      else
+        compute_signature_slice(text)
+      end
+    end
+
+    def self.compute_signature_slice_weighted(text : String, weights : Hash(String, Float64)) : Slice(UInt32)
+      num_hashes, _, _, shingle_size, min_words = config
+
+      normalized = text.downcase.strip
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
+
+      word_count = normalized.split(/\s+/).size
+      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
+
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
+
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      roller = ShingleRoller.new(shingle_size)
+
+      normalized.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          if shingle_str = roller.current_shingle
+            weight = weights[shingle_str]? || 1.0_f64
+            update_signature_weighted(signature, h64, weight)
+          end
+        end
+      end
+
+      signature
     end
 
     # Compute similarity between two signatures (Array or Slice)

@@ -207,4 +207,139 @@ describe LexisMinhash::LSHIndex do
     index.clear
     index.size.should eq(0)
   end
+
+  it "adds and queries documents with weights" do
+    index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100)
+
+    weights1 = {"quick" => 2.0_f64, "brown" => 2.0_f64}
+    weights2 = {"quick" => 2.0_f64, "brown" => 2.0_f64}
+
+    index.add_with_weights(1, "The quick brown fox jumps", weights1)
+    index.add_with_weights(2, "The quick brown dog runs", weights2)
+
+    index.size.should eq(2)
+
+    candidates = index.query_with_weights("The quick brown fox", {"quick" => 2.0_f64, "brown" => 2.0_f64})
+    candidates.size.should be > 0
+  end
+
+  it "adds and queries with weights" do
+    index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100)
+
+    weights = {"quick" => 2.0_f64, "brown" => 2.0_f64}
+    index.add_with_weights(1, "The quick brown fox jumps over the lazy dog", weights)
+    index.add_with_weights(2, "The quick brown cat sleeps on the lazy rug", weights)
+
+    index.size.should eq(2)
+
+    candidates = index.query_with_weights("The quick brown fox jumps", weights)
+    candidates.should be_a(Set(Int32))
+  end
+end
+
+describe LexisMinhash::Similarity do
+  describe "weighted_overlap" do
+    it "returns 0.0 for empty hashes" do
+      a = Hash(String, Float64).new
+      b = Hash(String, Float64).new
+      LexisMinhash::Similarity.weighted_overlap(a, b).should eq(0.0_f64)
+    end
+
+    it "returns 0.0 when one hash is empty" do
+      a = Hash(String, Float64).new
+      b = {"word" => 1.0_f64}
+      LexisMinhash::Similarity.weighted_overlap(a, b).should eq(0.0_f64)
+      LexisMinhash::Similarity.weighted_overlap(b, a).should eq(0.0_f64)
+    end
+
+    it "returns 1.0 for identical hashes" do
+      a = {"word1" => 0.5_f64, "word2" => 0.3_f64}
+      b = {"word1" => 0.5_f64, "word2" => 0.3_f64}
+      LexisMinhash::Similarity.weighted_overlap(a, b).should eq(1.0_f64)
+    end
+
+    it "returns correct weighted overlap for partial matches" do
+      a = {"word1" => 0.5_f64, "word2" => 0.5_f64}
+      b = {"word1" => 0.5_f64, "word3" => 0.5_f64}
+      result = LexisMinhash::Similarity.weighted_overlap(a, b)
+      result.should eq(0.5_f64)
+    end
+
+    it "uses minimum weight when weights differ" do
+      a = {"word" => 0.8_f64}
+      b = {"word" => 0.2_f64}
+      result = LexisMinhash::Similarity.weighted_overlap(a, b)
+      result.should eq(1.0_f64)
+    end
+
+    it "uses minimum of sums in denominator" do
+      a = {"word1" => 0.5_f64}
+      b = {"word1" => 0.3_f64, "word2" => 0.5_f64}
+      result = LexisMinhash::Similarity.weighted_overlap(a, b)
+      intersection = 0.3_f64
+      sum_a = 0.5_f64
+      expected = intersection / sum_a
+      result.should eq(expected)
+    end
+  end
+end
+
+describe LexisMinhash::Engine do
+  describe "compute_signature with weights" do
+    it "returns signature of correct size with weights" do
+      weights = Hash(String, Float64).new
+      sig = LexisMinhash::Engine.compute_signature("Hello World Test Document", weights)
+      sig.size.should eq(100)
+    end
+
+    it "returns signature of correct size with nil weights" do
+      sig = LexisMinhash::Engine.compute_signature("Hello World Test Document", nil)
+      sig.size.should eq(100)
+    end
+
+    it "returns consistent signatures for same text and weights" do
+      weights = {"hello" => 0.5_f64, "world" => 0.8_f64}
+      sig1 = LexisMinhash::Engine.compute_signature("Hello World Test", weights)
+      sig2 = LexisMinhash::Engine.compute_signature("Hello World Test", weights)
+      sig1.should eq(sig2)
+    end
+
+    it "produces different signatures with different weights" do
+      text = "hello world test document for testing"
+      sig1 = LexisMinhash::Engine.compute_signature(text, {"hello" => 0.5_f64, "world" => 0.5_f64})
+      sig2 = LexisMinhash::Engine.compute_signature(text, {"hello" => 2.0_f64, "world" => 2.0_f64})
+      sig1.should_not eq(sig2)
+    end
+
+    it "falls back to default weight 1.0 for unknown shingles" do
+      sig1 = LexisMinhash::Engine.compute_signature("hello world", {"unknown" => 10.0_f64})
+      sig2 = LexisMinhash::Engine.compute_signature("hello world", nil)
+      (sig1 == sig2).should be_true
+    end
+
+    it "treats negative weights as 0 (excluded from signature)" do
+      sig_with_negative = LexisMinhash::Engine.compute_signature("hello world test", {"hello" => -1.0_f64})
+      sig_without_term = LexisMinhash::Engine.compute_signature("world test", nil)
+      sig_with_negative.should eq(sig_without_term)
+    end
+  end
+
+  describe "compute_signature_slice with weights" do
+    it "returns Slice of correct size with weights" do
+      weights = Hash(String, Float64).new
+      sig = LexisMinhash::Engine.compute_signature_slice("Hello World Test Document", weights)
+      sig.size.should eq(100)
+    end
+
+    it "returns Slice of correct size with nil weights" do
+      sig = LexisMinhash::Engine.compute_signature_slice("Hello World Test Document", nil)
+      sig.size.should eq(100)
+    end
+
+    it "is mutable for weighted update" do
+      weights = {"hello" => 0.5_f64}
+      sig = LexisMinhash::Engine.compute_signature_slice("hello world", weights)
+      sig.should be_a(Slice(UInt32))
+    end
+  end
 end

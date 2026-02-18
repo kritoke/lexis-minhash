@@ -42,6 +42,24 @@ Benchmark.ips do |x|
       LexisMinhash::Engine.compute_signature(text)
     end
   end
+
+  x.report("Engine.compute_signature (weighted)") do
+    weights = {
+      "quick" => 1.5_f64,
+      "brown" => 2.0_f64,
+      "jumps" => 1.8_f64,
+      "river" => 2.5_f64,
+    }
+    sample_texts.each do |text|
+      LexisMinhash::Engine.compute_signature(text, weights)
+    end
+  end
+
+  x.report("Engine.compute_signature_slice") do
+    sample_texts.each do |text|
+      LexisMinhash::Engine.compute_signature_slice(text)
+    end
+  end
 end
 
 puts
@@ -75,3 +93,29 @@ end
 puts
 puts "=== Load Factors ==="
 puts "LSHIndex load factors per band: #{index.load_factors.map(&.round(3))}"
+
+puts
+puts "=== Weighted Overlap Benchmark ==="
+puts
+
+doc_a = {
+  "machine"   => 0.8_f64,
+  "learning"  => 0.9_f64,
+  "data"      => 0.5_f64,
+  "science"   => 0.7_f64,
+  "algorithm" => 0.6_f64,
+}
+
+doc_b = {
+  "machine"  => 0.8_f64,
+  "learning" => 0.6_f64,
+  "model"    => 0.7_f64,
+  "neural"   => 0.5_f64,
+  "network"  => 0.4_f64,
+}
+
+Benchmark.ips do |x|
+  x.report("Similarity.weighted_overlap") do
+    LexisMinhash::Similarity.weighted_overlap(doc_a, doc_b)
+  end
+end

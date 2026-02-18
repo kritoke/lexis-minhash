@@ -2,10 +2,14 @@
 
 Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It uses rolling hash + multiply-shift for O(n) performance.
 
+For advanced usage patterns and client-side recommendations, see [API.md](./API.md).
+
 ## Features
 
 - **O(n) MinHash Signatures**: Rolling hash + multiply-shift, no intermediate string allocations
 - **Signature Similarity**: Fast approximate Jaccard similarity estimation
+- **Weighted MinHash**: Optional TF-IDF weights for frequency-biased sampling
+- **Weighted Overlap Coefficient**: Similarity measure for weighted document representations
 - **Overlap Coefficient**: Measure set similarity using |A ∩ B| / min(|A|, |B|)
 - **Locality-Sensitive Hashing (LSH)**: Efficient candidate retrieval using banding
 - **LSH Index**: In-memory index with linear probing for cache-efficient storage
@@ -40,6 +44,13 @@ sig2 = LexisMinhash::Engine.compute_signature("Document 2 text here")
 similarity = LexisMinhash::Engine.similarity(sig1, sig2)
 puts "Similarity: #{similarity}"
 
+# Generate signatures with optional TF-IDF weights
+weights = {
+  "important" => 2.5_f64,
+  "rareword"  => 3.0_f64,
+}
+sig_weighted = LexisMinhash::Engine.compute_signature("Important rareword document", weights)
+
 # Generate LSH bands for candidate detection
 bands = LexisMinhash::Engine.generate_bands(sig1)
 # bands is Array({Int32, UInt64}) with {band_index, band_hash} tuples
@@ -61,6 +72,27 @@ coefficient = LexisMinhash::Engine.overlap_coefficient(a, b)
 puts "Overlap: #{coefficient}"  # => 1.0
 ```
 
+### Weighted Overlap Coefficient
+
+The weighted overlap coefficient measures similarity between weighted document representations (e.g., TF-IDF vectors). It computes the sum of minimum weights for intersecting terms, normalized by the smaller total weight.
+
+```crystal
+doc_a = {
+  "machine" => 0.8_f64,
+  "learning" => 0.9_f64,
+  "data" => 0.5_f64,
+}
+
+doc_b = {
+  "machine" => 0.8_f64,
+  "learning" => 0.6_f64,
+  "model" => 0.7_f64,
+}
+
+similarity = LexisMinhash::Similarity.weighted_overlap(doc_a, doc_b)
+puts "Weighted overlap: #{similarity}"  # => ~0.736 (1.4 / min(2.2, 2.1))
+```
+
 ### Using LSHIndex
 
 ```crystal
@@ -71,9 +103,16 @@ index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 1000)
 index.add(1, "Technology company announces revolutionary product")
 index.add(2, "Technology company announces revolutionary update")
 
+# Add documents with TF-IDF weights
+weights = {"revolutionary" => 2.5_f64, "product" => 1.8_f64}
+index.add_with_weights(3, "Technology company announces revolutionary product", weights)
+
 # Query for similar documents
 candidates = index.query("Technology company announces")
 # candidates is Set(Int32) of doc IDs
+
+# Query with weights
+candidates_weighted = index.query_with_weights("Technology company announces", weights)
 
 # Query with similarity scores
 scored = index.query_with_scores("Technology company announces")
@@ -148,11 +187,41 @@ LexisMinhash::Engine.configure(min_words: 6)  # Stricter filtering
 Using rolling hash + multiply-shift:
 
 ```
-compute_signature (Array)       528µs  5.0kB/op
-compute_signature_slice         512µs  2.66kB/op  (recommended)
+Engine.compute_signature             22.02µs  9.43kB/op
+Engine.compute_signature (weighted)   98.36µs  74.8kB/op
+Engine.compute_signature_slice        21.54µs  7.09kB/op  (recommended)
+Similarity.weighted_overlap           73.85ns  160B/op
 ```
 
 **Note:** Default methods return `Array(UInt32)` for backward compatibility (~3% slower, 2x memory). Use `compute_signature_slice` and `bytes_to_signature_slice` for maximum performance.
+
+Weighted signature computation is ~4.5x slower due to string key lookups in the weights hash. Use `compute_signature_slice` for better performance when using weights.
+
+### Caching Weights for Better Performance
+
+If you're computing signatures repeatedly for the same documents, pre-compute a shingle-to-weight lookup to avoid repeated string operations:
+
+```crystal
+# Pre-compute all shingle weights for a document once
+def precompute_shingle_weights(text : String, base_weights : Hash(String, Float64)) : Hash(String, Float64)
+  cache = Hash(String, Float64).new(1.0_f64)
+  normalized = text.downcase
+  
+  (normalized.size - 4).times do |i|
+    shingle = normalized[i...i + 5]
+    cache[shingle] = base_weights[shingle]? || 1.0_f64
+  end
+  
+  cache
+end
+
+# Then reuse the cached weights
+weights = precompute_shingle_weights(document_text, tfidf_scores)
+sig1 = LexisMinhash::Engine.compute_signature(document_text, weights)
+sig2 = LexisMinhash::Engine.compute_signature(document_text, weights)
+```
+
+This moves the string allocation overhead to initialization time rather than signature computation.
 
 ### LSH Parameter Tuning
 
@@ -182,6 +251,20 @@ sim_similar.should be > sim_different
 
 # Brittle in tests - absolute threshold
 Engine.similarity(sig1, sig2).should be > 0.3  # May fail due to randomization
+```
+
+### Weighted LSH Queries
+
+When using weighted MinHash with LSHIndex, note that:
+- Documents added with `add_with_weights` produce different signatures than `add`
+- Query with the same weights to find matches: use `query_with_weights` for weighted-added documents
+- Mixing weighted and unweighted adds/queries may not find matches
+
+```crystal
+# Consistent approach: use weights for both add and query
+weights = {"important" => 2.0_f64, "term" => 1.5_f64}
+index.add_with_weights(1, "Important document term", weights)
+candidates = index.query_with_weights("Important term", weights)  # Finds doc 1
 ```
 
 Run benchmarks: `crystal run benchmark/benchmark.cr --release`

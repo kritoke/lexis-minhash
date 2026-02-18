@@ -109,6 +109,16 @@ module LexisMinhash
       end
     end
 
+    def add_with_weights(doc_id : Int32, text : String, weights : Hash(String, Float64)) : Nil
+      signature = Engine.compute_signature(text, weights)
+      @signatures[doc_id] = signature
+
+      band_hashes = Engine.generate_bands(signature)
+      band_hashes.each do |band_idx, band_hash|
+        @tables[band_idx].insert(band_hash, doc_id)
+      end
+    end
+
     def query(text : String) : Set(Int32)
       signature = Engine.compute_signature(text)
       query_by_signature(signature)
@@ -130,6 +140,15 @@ module LexisMinhash
     def query_with_scores(text : String) : Array({Int32, Float64})
       signature = Engine.compute_signature(text)
       query_with_scores_by_signature(signature)
+    end
+
+    def query_with_weights(text : String, weights : Hash(String, Float64)) : Set(Int32)
+      signature = Engine.compute_signature(text, weights)
+      query_by_signature(signature)
+    end
+
+    def query_with_weights_by_signature(signature : Array(UInt32), weights : Hash(String, Float64)) : Set(Int32)
+      query_by_signature(signature)
     end
 
     def query_with_scores_by_signature(signature : Array(UInt32)) : Array({Int32, Float64})
