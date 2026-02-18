@@ -61,10 +61,8 @@ module LexisMinhash
     end
 
     def to_blob : Bytes
-      slice = @data
-      bytes = Bytes.new(slice.size * sizeof(UInt32))
-      slice.to_unsafe.copy_to(bytes.to_unsafe, bytes.size)
-      bytes
+      # Cast the UInt32 slice to a raw Byte slice for SQLite BLOBs
+      @data.to_unsafe.as(UInt8*).to_slice(@data.size * sizeof(UInt32))
     end
 
     def self.from_blob(blob : Bytes) : Signature
