@@ -360,6 +360,62 @@ module LexisMinhash
       signature
     end
 
+    # Compute signature from pre-hashed UInt64 IDs
+    #
+    # This decouples hashing from the engine - the application handles
+    # String -> UInt64 conversion (e.g., using xxHash, FNV, or custom hashing).
+    # The engine operates purely on UInt64 hash values.
+    #
+    # ```
+    # # App handles its own hashing
+    # hashes = ["hello", "world", "test"].map { |s| my_hash_function(s) }
+    # sig = LexisMinhash::Engine.compute_signature_from_hashes(hashes)
+    # ```
+    def self.compute_signature_from_hashes(hashes : Iterable(UInt64)) : Slice(UInt32)
+      num_hashes, _, _, _, _ = config
+
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      a = @@a
+      b = @@b
+
+      hashes.each do |h64|
+        num_hashes.times do |i|
+          combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
+          signature[i] = combined_h if combined_h < signature[i]
+        end
+      end
+
+      signature
+    end
+
+    # Compute weighted signature from pre-hashed UInt64 IDs with weights
+    #
+    # Weights should be parallel to hashes or looked up by the caller.
+    # Higher weights bias toward those hashes "winning" the min position.
+    def self.compute_signature_from_hashes(hashes : Iterable(UInt64), weights : Iterable(Float64)) : Slice(UInt32)
+      num_hashes, _, _, _, _ = config
+
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      a = @@a
+      b = @@b
+
+      hashes.zip(weights).each do |h64, weight|
+        effective_weight = Math.max(weight, 0.0_f64)
+        next if effective_weight <= 0.0_f64
+
+        effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
+
+        num_hashes.times do |i|
+          combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
+          weighted_value = combined_h.to_f64 / effective_value
+          weighted_h = (weighted_value % Float64.new(UInt32::MAX)).to_u32
+          signature[i] = weighted_h if weighted_h < signature[i]
+        end
+      end
+
+      signature
+    end
+
     # Compute similarity between two signatures (Array or Slice)
     def self.similarity(sig1 : Array(UInt32) | Slice(UInt32), sig2 : Array(UInt32) | Slice(UInt32)) : Float64
       return 0.0_f64 if sig1.empty? || sig2.empty?
