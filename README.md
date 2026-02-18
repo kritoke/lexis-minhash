@@ -15,6 +15,8 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 - **LSH Index**: In-memory index with linear probing for cache-efficient storage
 - **Thread-Safe**: Mutex-protected configuration
 - **Runtime Configuration**: Adjust signature size, band count, shingle size at runtime
+- **Reproducible Hashes**: Optional seed for consistent signatures across restarts
+- **Signature Struct**: Convenient serialization with `to_blob`/`from_blob`
 
 ## Installation
 
@@ -44,12 +46,25 @@ sig2 = LexisMinhash::Engine.compute_signature("Document 2 text here")
 similarity = LexisMinhash::Engine.similarity(sig1, sig2)
 puts "Similarity: #{similarity}"
 
+# Or use Signature struct for convenient API
+sig = LexisMinhash::Signature.compute("Document text")
+similarity = sig.similarity(other_sig)
+
+# Serialize to blob for database storage
+bytes = sig.to_blob
+
+# Deserialize from blob
+sig2 = LexisMinhash::Signature.from_blob(bytes)
+
 # Generate signatures with optional TF-IDF weights
 weights = {
   "important" => 2.5_f64,
   "rareword"  => 3.0_f64,
 }
 sig_weighted = LexisMinhash::Engine.compute_signature("Important rareword document", weights)
+
+# Reproducible hashes (same seed = same signatures every run)
+LexisMinhash::Engine.configure(seed: 12345)
 
 # Generate LSH bands for candidate detection
 bands = LexisMinhash::Engine.generate_bands(sig1)
