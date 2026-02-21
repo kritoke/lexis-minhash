@@ -187,31 +187,7 @@ module LexisMinhash
     # Compute signature using rolling hash + multiply-shift
     # Returns Array(UInt32) for backward compatibility
     def self.compute_signature(text : String) : Array(UInt32)
-      num_hashes, _, _, shingle_size, min_words = config
-
-      # Normalize to lowercase for case-insensitive matching
-      normalized = text.downcase.strip
-
-      # Return zeros for empty or too-short strings (backward compatibility)
-      return Array(UInt32).new(num_hashes, 0_u32) if normalized.empty?
-
-      # Return zeros if word count is below minimum
-      word_count = normalized.split(/\s+/).size
-      return Array(UInt32).new(num_hashes, 0_u32) if word_count < min_words
-
-      # Return zeros if text is shorter than shingle size
-      return Array(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      roller = ShingleRoller.new(shingle_size)
-
-      normalized.each_byte do |byte|
-        if h64 = roller.roll(byte)
-          update_signature(signature, h64)
-        end
-      end
-
-      signature.to_a
+      compute_signature_slice(text).to_a
     end
 
     # Compute signature as Slice(UInt32) for performance-critical code
@@ -275,7 +251,7 @@ module LexisMinhash
     # Negative weights are clamped to 0 (excluded from signature).
     def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
       if weights
-        compute_signature_weighted(text, weights)
+        compute_signature_slice_weighted(text, weights).to_a
       else
         compute_signature(text)
       end
@@ -287,30 +263,7 @@ module LexisMinhash
     # This causes rare (high-weight) terms to produce smaller values that are
     # more likely to "win" the minimum hash position.
     def self.compute_signature_weighted(text : String, weights : Hash(String, Float64)) : Array(UInt32)
-      num_hashes, _, _, shingle_size, min_words = config
-
-      normalized = text.downcase.strip
-      return Array(UInt32).new(num_hashes, 0_u32) if normalized.empty?
-
-      word_count = normalized.split(/\s+/).size
-      return Array(UInt32).new(num_hashes, 0_u32) if word_count < min_words
-
-      return Array(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      roller = ShingleRoller.new(shingle_size)
-      def_weight = default_weight
-
-      normalized.each_byte do |byte|
-        if h64 = roller.roll(byte)
-          if shingle_str = roller.current_shingle
-            weight = weights[shingle_str]? || def_weight
-            update_signature_weighted(signature, h64, weight)
-          end
-        end
-      end
-
-      signature.to_a
+      compute_signature_slice_weighted(text, weights).to_a
     end
 
     private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
