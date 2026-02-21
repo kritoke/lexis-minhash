@@ -68,6 +68,10 @@ module LexisMinhash
     def self.from_blob(blob : Bytes) : Signature
       return Signature.new(Slice(UInt32).new(0)) if blob.empty?
 
+      if blob.size % sizeof(UInt32) != 0
+        raise ArgumentError.new("Invalid blob size: must be a multiple of #{sizeof(UInt32)} bytes")
+      end
+
       count = blob.size // sizeof(UInt32)
       slice = Slice(UInt32).new(count)
       blob.copy_to(slice.to_unsafe, blob.size)
@@ -142,6 +146,9 @@ module LexisMinhash
       @@mutex.synchronize do
         @@num_hashes = signature_size
         @@bands = num_bands
+        if signature_size % num_bands != 0
+          raise ArgumentError.new("signature_size must be divisible by num_bands")
+        end
         @@rows = signature_size // num_bands
         @@shingle_size = shingle_size
         @@min_words = min_words

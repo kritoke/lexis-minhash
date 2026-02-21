@@ -43,7 +43,7 @@ module LexisMinhash
     # b = Slice.new(3) { |i| (i * 2 + 2).to_u64 } # [2, 4, 6]
     # LexisMinhash::Similarity.fast_overlap(a, b) # => 0.5
     # ```
-    def self.fast_overlap(a : Slice(UInt64), b : Slice(UInt64)) : Float64
+    private def self.fast_overlap_generic(a : Slice(T), b : Slice(T)) : Float64 forall T
       return 0.0_f64 if a.empty? || b.empty?
 
       i, j, intersection = 0, 0, 0
@@ -61,25 +61,15 @@ module LexisMinhash
       intersection.to_f64 / {a.size, b.size}.min
     end
 
+    def self.fast_overlap(a : Slice(UInt64), b : Slice(UInt64)) : Float64
+      fast_overlap_generic(a, b)
+    end
+
     # Optimized overlap coefficient using two-pointer scan for sorted Slices (UInt32)
     #
     # Input slices MUST be sorted in ascending order.
     def self.fast_overlap(a : Slice(UInt32), b : Slice(UInt32)) : Float64
-      return 0.0_f64 if a.empty? || b.empty?
-
-      i, j, intersection = 0, 0, 0
-      while i < a.size && j < b.size
-        if a[i] == b[j]
-          intersection += 1
-          i += 1
-          j += 1
-        elsif a[i] < b[j]
-          i += 1
-        else
-          j += 1
-        end
-      end
-      intersection.to_f64 / {a.size, b.size}.min
+      fast_overlap_generic(a, b)
     end
   end
 end

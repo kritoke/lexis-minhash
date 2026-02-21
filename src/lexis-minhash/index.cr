@@ -77,7 +77,8 @@ module LexisMinhash
     @signatures : Hash(Int32, Array(UInt32))
     @tables : Array(LinearBucketTable)
     @bands : Int32
-    @rows : Int32
+
+    # @rows unused: configuration drives row count from Engine; remove to avoid confusion
 
     # Initialize with expected number of documents for capacity planning
     # Table capacity is ~2x expected docs per band for good load factor
