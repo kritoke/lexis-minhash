@@ -74,7 +74,8 @@ module LexisMinhash
 
       count = blob.size // sizeof(UInt32)
       slice = Slice(UInt32).new(count)
-      blob.copy_to(slice.to_unsafe, blob.size)
+      # copy raw bytes into the UInt32 slice memory (copy as UInt8 pointer)
+      blob.copy_to(slice.to_unsafe.as(UInt8*), blob.size)
       Signature.new(slice)
     end
 

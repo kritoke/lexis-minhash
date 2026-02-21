@@ -105,6 +105,16 @@ describe LexisMinhash::Engine do
       restored = LexisMinhash::Engine.bytes_to_signature(bytes)
       original.should eq(restored)
     end
+
+    it "raises on malformed blob in Signature.from_blob" do
+      malformed = Bytes.new(3)
+      begin
+        LexisMinhash::Signature.from_blob(malformed)
+        false.should be_true
+      rescue ex
+        ex.should be_a(ArgumentError)
+      end
+    end
   end
 
   describe "configure" do
@@ -122,6 +132,18 @@ describe LexisMinhash::Engine do
 
       # Reset to defaults
       LexisMinhash::Engine.configure(signature_size: 100, num_bands: 20, shingle_size: 5)
+    end
+
+    it "raises if signature_size is not divisible by num_bands" do
+      begin
+        LexisMinhash::Engine.configure(signature_size: 50, num_bands: 12)
+        false.should be_true
+      rescue ex
+        ex.should be_a(ArgumentError)
+      ensure
+        # Reset to defaults for other tests
+        LexisMinhash::Engine.configure(signature_size: 100, num_bands: 20, shingle_size: 5)
+      end
     end
   end
 
