@@ -58,6 +58,32 @@ jobs:
           files: coverage/lcov.info
           flags: unittests
           fail_ci_if_error: false
+      - name: Enforce coverage threshold
+        env:
+          COVERAGE_THRESHOLD: 80
+        run: |
+          set -euo pipefail
+          FILE=coverage/lcov.info
+          if [ ! -f "$FILE" ]; then
+            echo "Coverage file $FILE not found"
+            exit 1
+          fi
+          lh=0
+          lf=0
+          while IFS= read -r line; do
+            case "$line" in
+              LH:*) lh=$((lh + ${line#LH:}));;
+              LF:*) lf=$((lf + ${line#LF:}));;
+            esac
+          done < "$FILE"
+          if [ "$lf" -eq 0 ]; then
+            echo "No coverage data (total lines = 0)"; exit 1
+          fi
+          pct=$(( 100 * lh / lf ))
+          echo "Coverage: ${pct}% (threshold ${COVERAGE_THRESHOLD}%)"
+          if [ "$pct" -lt "$COVERAGE_THRESHOLD" ]; then
+            echo "Coverage ${pct}% is below threshold ${COVERAGE_THRESHOLD}%"; exit 2
+          fi
 
   examples:
     runs-on: ubuntu-latest
@@ -97,6 +123,15 @@ jobs:
             && rm -rf /var/lib/apt/lists/*
       - name: Install shards
         run: shards install
+      - name: Cache shards in container job
+        uses: actions/cache@v4
+        with:
+          path: |
+            lib
+            ~/.cache/shards
+          key: ${{ runner.os }}-shards-${{ hashFiles('shard.lock') }}-container
+          restore-keys: |
+            ${{ runner.os }}-shards-
       - name: Run ameba linter
         run: bin/ameba
       - name: Run specs

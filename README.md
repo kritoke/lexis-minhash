@@ -4,6 +4,8 @@
 
 [![Coverage](https://codecov.io/gh/kritoke/lexis-minhash/branch/main/graph/badge.svg?token=)](https://codecov.io/gh/kritoke/lexis-minhash)
 
+Note: CI enforces a minimum coverage threshold (80%). If coverage falls below the threshold the `test` job will fail.
+
 Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It uses rolling hash + multiply-shift for O(n) performance.
 
 For advanced usage patterns and client-side recommendations, see [API.md](./API.md).
