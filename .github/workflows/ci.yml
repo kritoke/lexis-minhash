@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Crystal
+        uses: ivangabriele/setup-crystal@v1
+        with:
+          crystal-version: '1.19.1'
+      - name: Install dependencies
+        run: shards install
+      - name: Run ameba linter
+        run: bin/ameba
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Crystal
+        uses: ivangabriele/setup-crystal@v1
+        with:
+          crystal-version: '1.19.1'
+      - name: Install dependencies
+        run: shards install
+      - name: Run specs
+        run: crystal spec
+
+  examples:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Crystal
+        uses: ivangabriele/setup-crystal@v1
+        with:
+          crystal-version: '1.19.1'
+      - name: Install dependencies
+        run: shards install
+      - name: Run examples (CI mode - non-release)
+        run: scripts/run_examples_ci.sh
+
+  benchmarks:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Crystal
+        uses: ivangabriele/setup-crystal@v1
+        with:
+          crystal-version: '1.19.1'
+      - name: Install dependencies
+        run: shards install
+      - name: Run release benchmarks
+        run: ./scripts/run_examples.sh && crystal run benchmark/benchmark.cr --release
