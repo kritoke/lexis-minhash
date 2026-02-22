@@ -267,6 +267,11 @@ module LexisMinhash
       compute_signature_slice_weighted(text, weights).to_a
     end
 
+    # Compute weighted signature using hashed shingle keys to avoid building Strings per shingle
+    def self.compute_signature(text : String, weights : Hash(UInt64, Float64)) : Array(UInt32)
+      compute_signature_slice_weighted_hashed(text, weights).to_a
+    end
+
     private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
       num_hashes, _, _, _ = config
       a = @@a
@@ -317,6 +322,49 @@ module LexisMinhash
       end
 
       signature
+    end
+
+    # Compute weighted signature where weights are keyed by the shingle's UInt64 rolling hash.
+    # This avoids allocating a String for every shingle and can significantly reduce
+    # allocations when weights are provided.
+    def self.compute_signature_slice_weighted_hashed(text : String, weights_hashed : Hash(UInt64, Float64)) : Slice(UInt32)
+      num_hashes, _, _, shingle_size, min_words = config
+
+      normalized = text.downcase.strip
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
+
+      word_count = normalized.split(/\s+/).size
+      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
+
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
+
+      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
+      roller = ShingleRoller.new(shingle_size)
+      def_weight = default_weight
+
+      normalized.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          weight = weights_hashed[h64]? || def_weight
+          update_signature_weighted(signature, h64, weight)
+        end
+      end
+
+      signature
+    end
+
+    # Helper to compute the rolling shingle hash for a given shingle string.
+    # This is useful for converting a weights Hash(String, Float64) into
+    # a Hash(UInt64, Float64) once, then using the hashed version for many
+    # documents to avoid repeated string allocations.
+    def self.shingle_hash_for(shingle : String) : UInt64
+      roller = ShingleRoller.new(shingle.size)
+      h = 0_u64
+      shingle.each_byte do |b|
+        if hh = roller.roll(b)
+          h = hh
+        end
+      end
+      h
     end
 
     # Compute signature from pre-hashed UInt64 IDs
