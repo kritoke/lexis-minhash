@@ -50,8 +50,14 @@ jobs:
           crystal: 1.18.2
       - name: Install dependencies
         run: shards install
-      - name: Run specs
-        run: crystal spec
+      - name: Run specs with coverage
+        run: crystal spec --coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/lcov.info
+          flags: unittests
+          fail_ci_if_error: false
 
   examples:
     runs-on: ubuntu-latest

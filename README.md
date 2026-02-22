@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/kritoke/lexis-minhash/actions/workflows/ci.yml/badge.svg)](https://github.com/kritoke/lexis-minhash/actions) [![Release](https://img.shields.io/github/v/release/kritoke/lexis-minhash)](https://github.com/kritoke/lexis-minhash/releases) [![License](https://img.shields.io/github/license/kritoke/lexis-minhash)](LICENSE)
 
+[![Coverage](https://codecov.io/gh/kritoke/lexis-minhash/branch/main/graph/badge.svg?token=)](https://codecov.io/gh/kritoke/lexis-minhash)
+
 Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It uses rolling hash + multiply-shift for O(n) performance.
 
 For advanced usage patterns and client-side recommendations, see [API.md](./API.md).
