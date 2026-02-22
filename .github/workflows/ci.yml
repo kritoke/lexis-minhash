@@ -10,12 +10,15 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Crystal
         uses: ivangabriele/setup-crystal@v1
         with:
-          crystal-version: '1.19.1'
+          crystal-version: ${{ matrix.crystal-version }}
       - name: Install dependencies
         run: shards install
       - name: Run ameba linter
@@ -24,12 +27,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     needs: lint
+    strategy:
+      matrix:
+        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Crystal
         uses: ivangabriele/setup-crystal@v1
         with:
-          crystal-version: '1.19.1'
+          crystal-version: ${{ matrix.crystal-version }}
       - name: Install dependencies
         run: shards install
       - name: Run specs
@@ -38,12 +44,15 @@ jobs:
   examples:
     runs-on: ubuntu-latest
     needs: test
+    strategy:
+      matrix:
+        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Crystal
         uses: ivangabriele/setup-crystal@v1
         with:
-          crystal-version: '1.19.1'
+          crystal-version: ${{ matrix.crystal-version }}
       - name: Install dependencies
         run: shards install
       - name: Run examples (CI mode - non-release)
