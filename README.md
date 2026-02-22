@@ -26,7 +26,7 @@ Add the dependency to your `shard.yml`:
 dependencies:
   lexis-minhash:
     github: kritoke/lexis-minhash
-    version: ~> 0.3.0
+    version: ~> 0.4.0
 ```
 
 Then run `shards install`.
