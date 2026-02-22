@@ -10,15 +10,15 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Crystal
-        uses: ivangabriele/setup-crystal@v1
-        with:
-          crystal-version: ${{ matrix.crystal-version }}
+      - name: Install Crystal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
+          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
+          sudo apt-get update
+          sudo apt-get install -y crystal
       - name: Install dependencies
         run: shards install
       - name: Run ameba linter
@@ -27,15 +27,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     needs: lint
-    strategy:
-      matrix:
-        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Crystal
-        uses: ivangabriele/setup-crystal@v1
-        with:
-          crystal-version: ${{ matrix.crystal-version }}
+      - name: Install Crystal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
+          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
+          sudo apt-get update
+          sudo apt-get install -y crystal
       - name: Install dependencies
         run: shards install
       - name: Run specs
@@ -44,15 +44,15 @@ jobs:
   examples:
     runs-on: ubuntu-latest
     needs: test
-    strategy:
-      matrix:
-        crystal-version: ["1.18.2", "1.19.1"]
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Crystal
-        uses: ivangabriele/setup-crystal@v1
-        with:
-          crystal-version: ${{ matrix.crystal-version }}
+      - name: Install Crystal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
+          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
+          sudo apt-get update
+          sudo apt-get install -y crystal
       - name: Install dependencies
         run: shards install
       - name: Run examples (CI mode - non-release)
