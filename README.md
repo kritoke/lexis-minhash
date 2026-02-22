@@ -321,6 +321,8 @@ Or use the helper script (intended for CI) to run all examples:
 ./scripts/run_examples.sh
 ```
 
+CI status: ![CI](https://github.com/owner/repo/actions/workflows/ci.yml/badge.svg)
+
 ## API Reference
 
 ### Engine Methods
