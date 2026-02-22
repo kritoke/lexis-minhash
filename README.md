@@ -238,6 +238,26 @@ sig2 = LexisMinhash::Engine.compute_signature(document_text, weights)
 
 This moves the string allocation overhead to initialization time rather than signature computation.
 
+### Prehashing Weights (Recommended)
+
+When you use the same weights map for many documents, pre-hash the shingle keys once and use the hashed-weighted API to avoid allocating shingle Strings per document:
+
+```crystal
+# Original weights keyed by shingle string
+base_weights = {"quick" => 2.0_f64, "brown" => 2.0_f64}
+
+# Prehash the weights once (computes rolling-hash -> weight)
+hashed = LexisMinhash::Engine.prehash_weights(base_weights)
+
+# Compute signatures using the hashed-weighted path (no per-shingle String allocations)
+sig = LexisMinhash::Engine.compute_signature("The quick brown fox jumps", hashed)
+
+# Alternatively use the convenience method that prehashes and computes in one call
+sig2 = LexisMinhash::Engine.compute_signature_with_prehashed_weights("The quick brown fox jumps", base_weights)
+```
+
+Use the hashed path when processing many documents with the same weights map — it typically reduces allocations and improves throughput.
+
 ### LSH Parameter Tuning
 
 For 100 hashes targeting 0.75 similarity:
