@@ -12,11 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Crystal
+      - name: Install Crystal (add repo & key)
         run: |
           sudo apt-get update
           sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
-          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
+          # Import Crystal apt signing key and add repository
+          curl -sSL https://dist.crystal-lang.org/apt/keys.asc | sudo gpg --dearmor -o /usr/share/keyrings/crystal-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/crystal-archive-keyring.gpg] https://dist.crystal-lang.org/apt crystal main" | sudo tee /etc/apt/sources.list.d/crystal.list
           sudo apt-get update
           sudo apt-get install -y crystal
       - name: Install dependencies
