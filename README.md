@@ -18,6 +18,29 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 - **Reproducible Hashes**: Optional seed for consistent signatures across restarts
 - **Signature Struct**: Convenient serialization with `to_blob`/`from_blob`
 
+## What's New in v0.4.0
+
+- Added `Engine.prehash_weights` and hashed-weighted APIs to avoid per-shingle String allocations when using weights.
+- Added `Engine.compute_signature_with_prehashed_weights` convenience helper.
+- Added examples (see `examples/`) and CI workflows; added release benchmarks.
+- Validation hardening: `Engine.configure` now raises if `signature_size` is not divisible by `num_bands` to avoid silent misconfiguration.
+- `Signature.from_blob` now validates blob length and raises on malformed input.
+
+See the full release notes at https://github.com/kritoke/lexis-minhash/releases/tag/v0.4.0
+
+## Upgrade Notes
+
+- If you previously used non-divisible `signature_size`/`num_bands` combos, update your configuration to satisfy `signature_size % num_bands == 0`. `Engine.configure` will now raise `ArgumentError` for invalid combinations instead of silently truncating rows per band.
+- When using weighted MinHash at scale, prehash your weight map once and use the hashed-weighted API to reduce allocations:
+
+```crystal
+hashed = LexisMinhash::Engine.prehash_weights(base_weights)
+sig = LexisMinhash::Engine.compute_signature(text, hashed)
+```
+
+This repo also includes `examples/prehash_example.cr` demonstrating the pattern.
+
+
 ## Installation
 
 Add the dependency to your `shard.yml`:
