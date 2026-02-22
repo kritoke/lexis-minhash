@@ -367,6 +367,27 @@ module LexisMinhash
       h
     end
 
+    # Convert a Hash(String, Float64) of shingle -> weight into a Hash(UInt64, Float64)
+    # keyed by the shingle rolling hash. This should be called once for a weights map
+    # that will be reused across many documents to avoid repeated shingle string
+    # allocations during signature computation.
+    def self.prehash_weights(weights : Hash(String, Float64)) : Hash(UInt64, Float64)
+      hashed = Hash(UInt64, Float64).new
+      weights.each do |shingle, weight|
+        h = shingle_hash_for(shingle)
+        hashed[h] = weight
+      end
+      hashed
+    end
+
+    # Convenience: take a Hash(String, Float64), prehash it once, and compute signature.
+    # Useful when callers prefer the string-keyed API but still want the allocation
+    # improvements of the hashed-weight path.
+    def self.compute_signature_with_prehashed_weights(text : String, weights : Hash(String, Float64)) : Array(UInt32)
+      hashed = prehash_weights(weights)
+      compute_signature_slice_weighted_hashed(text, hashed).to_a
+    end
+
     # Compute signature from pre-hashed UInt64 IDs
     #
     # This decouples hashing from the engine - the application handles
