@@ -1,5 +1,7 @@
 # Lexis MinHash
 
+[![CI](https://github.com/kritoke/lexis-minhash/actions/workflows/ci.yml/badge.svg)](https://github.com/kritoke/lexis-minhash/actions) [![Release](https://img.shields.io/github/v/release/kritoke/lexis-minhash)](https://github.com/kritoke/lexis-minhash/releases) [![License](https://img.shields.io/github/license/kritoke/lexis-minhash)](LICENSE)
+
 Lexis MinHash is a locality-sensitive hashing (LSH) library for detecting similar text documents using the MinHash technique. It uses rolling hash + multiply-shift for O(n) performance.
 
 For advanced usage patterns and client-side recommendations, see [API.md](./API.md).
@@ -344,7 +346,7 @@ Or use the helper script (intended for CI) to run all examples:
 ./scripts/run_examples.sh
 ```
 
-CI status: ![CI](https://github.com/kritoke/lexis-minhash/actions/workflows/ci.yml/badge.svg)
+
 
 ## API Reference
 
@@ -390,6 +392,34 @@ bin/ameba
 # Run benchmarks
 crystal run benchmark/benchmark.cr --release
 ```
+
+### Docker-based CI
+
+This project also includes a Docker-friendly CI job pattern (used successfully in my other projects) to run tests inside a reproducible Crystal image and avoid runtime bootstrapping issues on the runner. Example job snippet for GitHub Actions:
+
+```yaml
+docker-test:
+  name: Test in Crystal Docker image
+  runs-on: ubuntu-latest
+  container:
+    image: 84codes/crystal:1.18.2-ubuntu-22.04
+  steps:
+    - uses: actions/checkout@v4
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libmagic-dev libssl-dev libxml2-dev pkg-config ca-certificates curl \
+          && rm -rf /var/lib/apt/lists/*
+    - name: Install shards
+      run: shards install
+    - name: Run ameba linter
+      run: bin/ameba
+    - name: Run specs
+      run: crystal spec
+```
+
+Use this job alongside the existing runner-based jobs to get both fast native checks and a reproducible container execution.
 
 ## Contributing
 

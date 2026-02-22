@@ -49,6 +49,26 @@ jobs:
       - name: Run examples (CI mode - non-release)
         run: scripts/run_examples_ci.sh
 
+  docker-test:
+    name: Test in Crystal Docker image
+    runs-on: ubuntu-latest
+    container:
+      image: 84codes/crystal:1.18.2-ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libmagic-dev libssl-dev libxml2-dev pkg-config ca-certificates curl \
+            && rm -rf /var/lib/apt/lists/*
+      - name: Install shards
+        run: shards install
+      - name: Run ameba linter
+        run: bin/ameba
+      - name: Run specs
+        run: crystal spec
+
   benchmarks:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
