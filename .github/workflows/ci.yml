@@ -12,15 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Crystal (add repo & key)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
-          # Import Crystal apt signing key and add repository
-          curl -sSL https://dist.crystal-lang.org/apt/keys.asc | sudo gpg --dearmor -o /usr/share/keyrings/crystal-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/crystal-archive-keyring.gpg] https://dist.crystal-lang.org/apt crystal main" | sudo tee /etc/apt/sources.list.d/crystal.list
-          sudo apt-get update
-          sudo apt-get install -y crystal
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
       - name: Install dependencies
         run: shards install
       - name: Run ameba linter
@@ -32,12 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Crystal
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
-          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
-          sudo apt-get update
-          sudo apt-get install -y crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
       - name: Install dependencies
         run: shards install
       - name: Run specs
@@ -49,12 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Crystal
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg apt-transport-https ca-certificates
-          curl -sSL https://dist.crystal-lang.org/apt/setup.sh | sudo bash
-          sudo apt-get update
-          sudo apt-get install -y crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
       - name: Install dependencies
         run: shards install
       - name: Run examples (CI mode - non-release)
@@ -66,10 +55,10 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Crystal
-        uses: ivangabriele/setup-crystal@v1
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
         with:
-          crystal-version: '1.19.1'
+          crystal: 1.18.2
       - name: Install dependencies
         run: shards install
       - name: Run release benchmarks
