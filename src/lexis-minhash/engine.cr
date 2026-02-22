@@ -359,8 +359,8 @@ module LexisMinhash
     def self.shingle_hash_for(shingle : String) : UInt64
       roller = ShingleRoller.new(shingle.size)
       h = 0_u64
-      shingle.each_byte do |b|
-        if hh = roller.roll(b)
+      shingle.each_byte do |byte|
+        if hh = roller.roll(byte)
           h = hh
         end
       end
