@@ -304,6 +304,23 @@ candidates = index.query_with_weights("Important term", weights)  # Finds doc 1
 
 Run benchmarks: `crystal run benchmark/benchmark.cr --release`
 
+### Examples
+
+There is a small examples folder demonstrating common workflows including prehashing weights to improve weighted MinHash performance.
+
+Run a single example:
+
+```bash
+# Run the prehash example in release mode for realistic timings
+crystal run examples/prehash_example.cr --release
+```
+
+Or use the helper script (intended for CI) to run all examples:
+
+```bash
+./scripts/run_examples.sh
+```
+
 ## API Reference
 
 ### Engine Methods
