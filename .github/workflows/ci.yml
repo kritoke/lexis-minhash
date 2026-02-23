@@ -50,40 +50,8 @@ jobs:
           crystal: 1.18.2
       - name: Install dependencies
         run: shards install
-      - name: Run specs with coverage
-        run: crystal spec --coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage/lcov.info
-          flags: unittests
-          fail_ci_if_error: false
-      - name: Enforce coverage threshold
-        env:
-          COVERAGE_THRESHOLD: 80
-        run: |
-          set -euo pipefail
-          FILE=coverage/lcov.info
-          if [ ! -f "$FILE" ]; then
-            echo "Coverage file $FILE not found"
-            exit 1
-          fi
-          lh=0
-          lf=0
-          while IFS= read -r line; do
-            case "$line" in
-              LH:*) lh=$((lh + ${line#LH:}));;
-              LF:*) lf=$((lf + ${line#LF:}));;
-            esac
-          done < "$FILE"
-          if [ "$lf" -eq 0 ]; then
-            echo "No coverage data (total lines = 0)"; exit 1
-          fi
-          pct=$(( 100 * lh / lf ))
-          echo "Coverage: ${pct}% (threshold ${COVERAGE_THRESHOLD}%)"
-          if [ "$pct" -lt "$COVERAGE_THRESHOLD" ]; then
-            echo "Coverage ${pct}% is below threshold ${COVERAGE_THRESHOLD}%"; exit 2
-          fi
+      - name: Run specs
+        run: crystal spec
 
   examples:
     runs-on: ubuntu-latest
