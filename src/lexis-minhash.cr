@@ -37,6 +37,8 @@ require "./lexis-minhash/engine"
 require "./lexis-minhash/index"
 require "./lexis-minhash/similarity"
 
+# LexisMinhash: public API namespace for the library
+# Provides MinHash signature generation, similarity measures and an in-memory LSH index
 module LexisMinhash
   # Document interface for custom document types
   #

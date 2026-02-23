@@ -1,9 +1,14 @@
+# Similarity helpers and documentation for the LexisMinhash library.
+##
+# Provides weighted overlap and optimized fast overlap helpers for sorted slices.
 module LexisMinhash
   # Similarity measures for comparing documents
   #
   # This module provides various similarity metrics for comparing
   # document representations, including weighted overlap for TF-IDF
   # or other weighted document representations.
+  # Similarity contains similarity and overlap measures useful for comparing
+  # MinHash signatures and weighted document vectors.
   module Similarity
     # Computes the weighted overlap coefficient between two weighted document representations
     #
@@ -43,6 +48,8 @@ module LexisMinhash
     # b = Slice.new(3) { |i| (i * 2 + 2).to_u64 } # [2, 4, 6]
     # LexisMinhash::Similarity.fast_overlap(a, b) # => 0.5
     # ```
+    # Generic fast overlap for two sorted slices using two-pointer scan. Input
+    # slices MUST be sorted ascending. Returns intersection / min(|A|, |B|).
     private def self.fast_overlap_generic(a : Slice(T), b : Slice(T)) : Float64 forall T
       return 0.0_f64 if a.empty? || b.empty?
 
@@ -61,6 +68,7 @@ module LexisMinhash
       intersection.to_f64 / {a.size, b.size}.min
     end
 
+    # Fast overlap for UInt64 slices
     def self.fast_overlap(a : Slice(UInt64), b : Slice(UInt64)) : Float64
       fast_overlap_generic(a, b)
     end

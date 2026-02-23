@@ -5,7 +5,7 @@ describe "ShingleRoller" do
   it "rolls bytes and exposes current_shingle and reset" do
     r = LexisMinhash::ShingleRoller.new(3)
     bytes = "abcd".each_byte.to_a
-    vals = bytes.map { |b| r.roll(b) }
+    vals = bytes.map { |byte| r.roll(byte) }
     # At least the last roll should return a hash (window filled)
     vals.last.should_not be_nil
     # Current shingle should reflect last 3 characters
@@ -56,7 +56,7 @@ end
 
 describe "Similarity helpers and LSHIndex extras" do
   it "fast_overlap returns expected value for UInt32 slices" do
-    a = Slice.new(5) { |i| i.to_u32 }
+    a = Slice.new(5, &.to_u32)
     b = Slice.new(3) { |i| (i + 1).to_u32 }
     # intersection = [1,2,3] => 3/3 == 1.0
     LexisMinhash::Similarity.fast_overlap(a, b).should be_close(1.0_f64, 1e-9)
