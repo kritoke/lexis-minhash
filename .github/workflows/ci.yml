@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: shards install
       - name: Run ameba linter
-        run: bin/ameba
+        run: crystal run lib/ameba/bin/ameba.cr
 
   test:
     runs-on: ubuntu-latest
@@ -123,17 +123,8 @@ jobs:
             && rm -rf /var/lib/apt/lists/*
       - name: Install shards
         run: shards install
-      - name: Cache shards in container job
-        uses: actions/cache@v4
-        with:
-          path: |
-            lib
-            ~/.cache/shards
-          key: ${{ runner.os }}-shards-${{ hashFiles('shard.lock') }}-container
-          restore-keys: |
-            ${{ runner.os }}-shards-
       - name: Run ameba linter
-        run: bin/ameba
+        run: crystal run lib/ameba/bin/ameba.cr
       - name: Run specs
         run: crystal spec
 
