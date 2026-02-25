@@ -188,14 +188,14 @@ module LexisMinhash
 
         if seed
           seed_u64 = seed.to_u64
-          a_arr = [] of UInt64
-          b_arr = [] of UInt64
+          arr_a = Pointer(UInt64).malloc(signature_size)
+          arr_b = Pointer(UInt64).malloc(signature_size)
           signature_size.times do |i|
-            a_arr << (((seed_u64 &* 6364136223846793005 &+ 1442695040888963407) &+ i.to_u64) | 1)
-            b_arr << ((seed_u64 &* 6364136223846793005 &+ 1442695040888963407) &+ i.to_u64)
+            arr_a[i] = ((((seed_u64 &* 6364136223846793005_u64) &+ i.to_u64) &+ 1442695040888963407_u64) | 1_u64)
+            arr_b[i] = (((seed_u64 &* 6364136223846793005_u64) &+ i.to_u64) &+ 1442695040888963407_u64)
           end
-          @@a = Slice.new(a_arr.to_unsafe, signature_size)
-          @@b = Slice.new(b_arr.to_unsafe, signature_size)
+          @@a = Slice.new(arr_a, signature_size)
+          @@b = Slice.new(arr_b, signature_size)
         else
           @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
           @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }

@@ -108,7 +108,6 @@ module LexisMinhash
       table_capacity = expected_docs * 2
       @tables = Array.new(bands) { LinearBucketTable.new(table_capacity) }
       @bands = bands
-      @rows = 5
     end
 
     # Compute signature for text and insert into all band tables
@@ -175,8 +174,8 @@ module LexisMinhash
       query_by_signature(signature)
     end
 
-    # Query by signature where the original add used weights (keeps signature
-    # semantics consistent)
+    # Alias for query_by_signature - weights are not needed at query time
+    # since the signature already contains the weighted information
     def query_with_weights_by_signature(signature : Array(UInt32), weights : Hash(String, Float64)) : Set(Int32)
       query_by_signature(signature)
     end
