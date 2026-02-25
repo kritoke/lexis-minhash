@@ -1,3 +1,20 @@
+# Release 0.4.2
+
+## Bug Fixes
+
+- **Memory safety in seeded configure (Critical)**: Fixed memory safety bug in `Engine.configure` when using the `seed` parameter. Previously, the code was creating Slices pointing to local array memory, which would become dangling pointers after the method returned. Now uses `Pointer.malloc` to allocate properly owned memory.
+
+- **Removed unused instance variable**: Removed unused `@rows` instance variable from `LSHIndex`.
+
+## Improvements
+
+- CI: Removed docs workflow (no longer using GitHub Pages)
+- CI: Fixed ameba invocation to use `crystal run` instead of platform-specific binary
+- CI: Removed coverage flag that was causing failures on some Crystal versions
+- Documentation: Improved method documentation for `query_with_weights_by_signature`
+
+---
+
 # Release 0.4.1
 
 ## Bug Fixes

@@ -24,15 +24,13 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 - **Reproducible Hashes**: Optional seed for consistent signatures across restarts
 - **Signature Struct**: Convenient serialization with `to_blob`/`from_blob`
 
-## What's New in v0.4.0
+## What's New in v0.4.2
 
-- Added `Engine.prehash_weights` and hashed-weighted APIs to avoid per-shingle String allocations when using weights.
-- Added `Engine.compute_signature_with_prehashed_weights` convenience helper.
-- Added examples (see `examples/`) and CI workflows; added release benchmarks.
-- Validation hardening: `Engine.configure` now raises if `signature_size` is not divisible by `num_bands` to avoid silent misconfiguration.
-- `Signature.from_blob` now validates blob length and raises on malformed input.
+- **Memory safety fix**: Fixed critical memory safety bug in `Engine.configure` when using the `seed` parameter. Previously could cause undefined behavior due to dangling pointers.
+- Fixed unused `@rows` instance variable in `LSHIndex`.
+- Various CI improvements and bug fixes.
 
-See the full release notes at https://github.com/kritoke/lexis-minhash/releases/tag/v0.4.0
+See the full release notes at https://github.com/kritoke/lexis-minhash/releases/tag/v0.4.2
 
 ## Upgrade Notes
 
@@ -55,7 +53,7 @@ Add the dependency to your `shard.yml`:
 dependencies:
   lexis-minhash:
     github: kritoke/lexis-minhash
-    version: ~> 0.4.0
+    version: ~> 0.4.2
 ```
 
 Then run `shards install`.
