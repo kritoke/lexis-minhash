@@ -41,7 +41,7 @@ module LexisMinhash
     # Generate rolling shingle hashes (UInt64) for a text and window size `k`.
     # Yields each rolling hash to the provided block without allocating shingle
     # strings. This is a pure helper (no module-level mutation).
-    def self.shingles_hashes(text : String, k : Int32)
+    def self.shingles_hashes(text : String, k : Int32, &)
       p = 31_u64
       power = 1_u64
       (k - 1).times { power = power &* p }
@@ -65,7 +65,7 @@ module LexisMinhash
     # Yields (UInt64 hash, String shingle) for each shingle in the text.
     # The String is allocated per shingle, but this avoids the overhead of
     # creating a ShingleRoller instance and checking for completion separately.
-    def self.shingles_with_strings(text : String, k : Int32)
+    def self.shingles_with_strings(text : String, k : Int32, &)
       p = 31_u64
       power = 1_u64
       (k - 1).times { power = power &* p }
@@ -80,7 +80,7 @@ module LexisMinhash
         buffer << byte
         current_hash = (current_hash &* p) &+ byte.to_u64
         if buffer.size >= k
-          shingle_str = String.build { |io| buffer.each { |b| io.write_byte(b) } }
+          shingle_str = String.build { |io| buffer.each { |byte_val| io.write_byte(byte_val) } }
           yield current_hash, shingle_str
         end
       end

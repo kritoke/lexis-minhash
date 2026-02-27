@@ -229,10 +229,7 @@ module LexisMinhash
 
     # Compute weighted signature where weights are keyed by the shingle's UInt64 rolling hash.
     # This avoids allocating a String for every shingle and can significantly reduce
-    # allocations when weights are provided.
-    # Compute a weighted signature where weights are provided keyed by the
-    # shingle's rolling hash (UInt64). This avoids per-shingle String
-    # allocations and is recommended when reusing the same weights map.
+    # allocations when weights are provided. Recommended when reusing the same weights map.
     def self.compute_signature_slice_weighted_hashed(text : String, weights_hashed : Hash(UInt64, Float64)) : Slice(UInt32)
       num_hashes, _, _, shingle_size, min_words = config
 

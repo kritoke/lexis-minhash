@@ -50,4 +50,38 @@ describe LexisMinhash::Engine do
       hashes.should eq(roller_hashes)
     end
   end
+
+  describe "shingles_with_strings" do
+    it "yields hash and string for each shingle" do
+      text = "hello world"
+      k = 5
+      results = [] of {UInt64, String}
+      LexisMinhash::Engine.shingles_with_strings(text, k) do |hash_val, shingle_str|
+        results << {hash_val, shingle_str}
+      end
+
+      results.size.should eq(text.size - k + 1)
+      results.each do |hash_val, shingle_str|
+        hash_val.should be_a(UInt64)
+        shingle_str.size.should eq(k)
+      end
+    end
+
+    it "produces same hashes as shingles_hashes" do
+      text = "the quick brown fox"
+      k = 5
+
+      hashes_from_hashes = [] of UInt64
+      LexisMinhash::Engine.shingles_hashes(text, k) do |hash_val|
+        hashes_from_hashes << hash_val
+      end
+
+      hashes_from_with_strings = [] of UInt64
+      LexisMinhash::Engine.shingles_with_strings(text, k) do |hash_val, _str|
+        hashes_from_with_strings << hash_val
+      end
+
+      hashes_from_hashes.should eq(hashes_from_with_strings)
+    end
+  end
 end

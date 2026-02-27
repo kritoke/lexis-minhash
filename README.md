@@ -224,6 +224,30 @@ This prevents clustering meaningless short headlines. Adjust based on your use c
 LexisMinhash::Engine.configure(min_words: 6)  # Stricter filtering
 ```
 
+### Functional Configuration API
+
+For explicit, deterministic, or thread-safe configuration, use `Engine::Config`:
+
+```crystal
+# Generate a config with optional seed for deterministic hashing
+cfg = LexisMinhash::Engine.generate_config(
+  signature_size: 50,
+  num_bands: 10,
+  shingle_size: 4,
+  seed: 12345  # Omit for random coefficients
+)
+
+# Use the config explicitly (pure function, no global state)
+sig = LexisMinhash::Engine.compute_signature_with_config(cfg, "Your text here")
+```
+
+Benefits of `Engine::Config`:
+- **Deterministic**: Pass a `seed` for reproducible signatures across runs
+- **Thread-safe**: No global state; each thread can use its own config
+- **Testable**: Easy to create known configurations for tests
+
+The runtime `Engine.configure` method updates a global default config used by convenience methods like `Engine.compute_signature`.
+
 ## Performance
 
 Using rolling hash + multiply-shift:

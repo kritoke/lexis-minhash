@@ -36,6 +36,15 @@ sample_texts = [
   "Local restaurant wins prestigious culinary award for innovative cuisine",
 ]
 
+# Pre-hashed weights for performance comparison
+string_weights = {
+  "quick" => 1.5_f64,
+  "brown" => 2.0_f64,
+  "jumps" => 1.8_f64,
+  "river" => 2.5_f64,
+}
+hashed_weights = LexisMinhash::Engine.prehash_weights(string_weights)
+
 Benchmark.ips do |x|
   x.report("Engine.compute_signature") do
     sample_texts.each do |text|
@@ -43,15 +52,15 @@ Benchmark.ips do |x|
     end
   end
 
-  x.report("Engine.compute_signature (weighted)") do
-    weights = {
-      "quick" => 1.5_f64,
-      "brown" => 2.0_f64,
-      "jumps" => 1.8_f64,
-      "river" => 2.5_f64,
-    }
+  x.report("Engine.compute_signature (weighted, string keys)") do
     sample_texts.each do |text|
-      LexisMinhash::Engine.compute_signature(text, weights)
+      LexisMinhash::Engine.compute_signature(text, string_weights)
+    end
+  end
+
+  x.report("Engine.compute_signature (weighted, hashed keys)") do
+    sample_texts.each do |text|
+      LexisMinhash::Engine.compute_signature(text, hashed_weights)
     end
   end
 
