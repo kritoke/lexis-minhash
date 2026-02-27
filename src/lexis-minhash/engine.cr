@@ -4,55 +4,13 @@
 # MinHash signature generation (weighted and unweighted), helpers for
 # prehashing weights, and serialization helpers. The `Signature` struct is a
 # convenient wrapper for signatures with to_blob/from_blob helpers.
+require "./engine/config"
+require "./engine/rolling"
+require "./engine/signature"
+require "./engine/serialize"
+
 module LexisMinhash
-  # Rolling hash for O(n) shingling
-  #
-  # ShingleRoller computes a rolling polynomial hash over a sliding window of
-  # bytes (characters). It yields a UInt64 hash value once the window is full
-  # and also exposes the current shingle as a String. Used by the Engine to
-  # produce k-shingles for MinHash computation.
-  class ShingleRoller
-    P = 31_u64
-    getter window_size : Int32
-    @power = 1_u64
-    @current_hash = 0_u64
-    @buffer = Deque(UInt8).new
-
-    # Create a roller for a window of `window_size` bytes
-    def initialize(@window_size : Int32)
-      (@window_size - 1).times { @power = @power &* P }
-    end
-
-    # Add a byte to the rolling window and return the current shingle hash when
-    # the window is full. Returns `nil` until enough bytes have been fed.
-    def roll(byte : UInt8) : UInt64?
-      if @buffer.size == @window_size
-        out_byte = @buffer.shift
-        @current_hash = @current_hash &- (out_byte.to_u64 &* @power)
-      end
-
-      @buffer << byte
-      @current_hash = (@current_hash &* P) &+ byte.to_u64
-
-      return nil if @buffer.size < @window_size
-      @current_hash
-    end
-
-    # Reset the internal state and clear the buffer
-    def reset : Nil
-      @current_hash = 0_u64
-      @buffer.clear
-    end
-
-    # Returns the current shingle as a String when the window is full, otherwise
-    # returns `nil`.
-    def current_shingle : String?
-      return nil if @buffer.size < @window_size
-      String.build do |io|
-        @buffer.each { |byte| io.write_byte(byte) }
-      end
-    end
-  end
+  # ShingleRoller and shingles_hashes are implemented in engine/rolling.cr
 
   # MinHash signature wrapper providing convenient serialization and similarity
   #
@@ -122,16 +80,8 @@ module LexisMinhash
   # MinHash engine using rolling hash + multiply-shift
   # O(n) shingling with no intermediate string allocations
   module Engine
-    @@a : Slice(UInt64) = Slice(UInt64).new(0)
-    @@b : Slice(UInt64) = Slice(UInt64).new(0)
-    @@num_hashes : Int32 = 100
-    @@bands : Int32 = 20
-    @@rows : Int32 = 5
-    @@shingle_size : Int32 = 5
-    @@min_words : Int32 = 4
-    @@default_weight : Float64 = 1.0_f64
-    @@initialized = false
-    @@mutex = Mutex.new
+    # Runtime mutable engine state was moved to engine/config.cr. Use
+    # `default_config` and `configure` from there for deterministic setup.
 
     # Default configuration constants
     SIGNATURE_SIZE =     100
@@ -141,126 +91,37 @@ module LexisMinhash
     MIN_WORDS      =       4
     DEFAULT_WEIGHT = 1.0_f64
 
-    private def self.ensure_initialized
-      return if @@initialized
-      @@mutex.synchronize do
-        return if @@initialized
-        @@a = Slice(UInt64).new(@@num_hashes) { Random::Secure.rand(UInt64) | 1 }
-        @@b = Slice(UInt64).new(@@num_hashes) { Random::Secure.rand(UInt64) }
-        @@initialized = true
-      end
-    end
+    # Initialization and mutable coefficient state are handled in engine/config.cr
 
-    # Configures the MinHash engine parameters
-    #
-    # ```
-    # LexisMinhash::Engine.configure(
-    #   signature_size: 100, # Number of hash functions
-    #   num_bands: 20,       # Number of LSH bands
-    #   shingle_size: 5,     # Character n-gram size (k-shingles)
-    #   min_words: 4,        # Minimum words for valid signature
-    #   default_weight: 1.0, # Default weight for unknown shingles in weighted MinHash
-    #   seed: 12345          # Optional seed for reproducible hashes
-    # )
-    # ```
-    #
-    # **Seed Parameter**: When provided, uses a deterministic PRNG (PCG) to generate
-    # hash coefficients. This ensures signatures are consistent across application restarts.
-    # Omit or set to `nil` for random (secure) coefficients on each run.
-    def self.configure(
-      signature_size : Int32 = 100,
-      num_bands : Int32 = 20,
-      shingle_size : Int32 = 5,
-      min_words : Int32 = 4,
-      default_weight : Float64 = 1.0_f64,
-      seed : Int64? = nil,
-    ) : Nil
-      @@mutex.synchronize do
-        @@num_hashes = signature_size
-        @@bands = num_bands
-        if signature_size % num_bands != 0
-          raise ArgumentError.new("signature_size must be divisible by num_bands")
-        end
-        @@rows = signature_size // num_bands
-        @@shingle_size = shingle_size
-        @@min_words = min_words
-        @@default_weight = default_weight
+    # Config struct is provided in engine/config.cr (functional refactor)
 
-        if seed
-          seed_u64 = seed.to_u64
-          arr_a = Pointer(UInt64).malloc(signature_size)
-          arr_b = Pointer(UInt64).malloc(signature_size)
-          signature_size.times do |i|
-            arr_a[i] = ((((seed_u64 &* 6364136223846793005_u64) &+ i.to_u64) &+ 1442695040888963407_u64) | 1_u64)
-            arr_b[i] = (((seed_u64 &* 6364136223846793005_u64) &+ i.to_u64) &+ 1442695040888963407_u64)
-          end
-          @@a = Slice.new(arr_a, signature_size)
-          @@b = Slice.new(arr_b, signature_size)
-        else
-          @@a = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
-          @@b = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
-        end
-        @@initialized = true
-      end
-    end
+    # Rolling shingle helper is provided by engine/rolling.cr
 
-    # Return current engine configuration as a tuple:
-    # `{signature_size, num_bands, rows_per_band, shingle_size, min_words, default_weight}`
-    def self.config : {Int32, Int32, Int32, Int32, Int32, Float64}
-      ensure_initialized
-      @@mutex.synchronize do
-        {@@num_hashes, @@bands, @@rows, @@shingle_size, @@min_words, @@default_weight}
-      end
-    end
-
-    # Default weight used for shingles not present in a provided weights map
-    def self.default_weight : Float64
-      ensure_initialized
-      @@default_weight
-    end
+    # Engine configuration is implemented in `engine/config.cr` and exported
+    # from there (provides `Engine.configure`, `Engine.config`, and `Engine.default_weight`).
 
     # Compute signature using rolling hash + multiply-shift
     # Returns Array(UInt32) for backward compatibility
     # This API is convenient but slower than `compute_signature_slice` which
     # returns a `Slice(UInt32)` directly for performance-critical code.
     def self.compute_signature(text : String) : Array(UInt32)
-      compute_signature_slice(text).to_a
+      # Back-compat: use default config to compute signature via the pure API
+      cfg = default_config
+      compute_signature_with_config(cfg, text).to_a
     end
 
     # Compute signature as Slice(UInt32) for performance-critical code
     def self.compute_signature_slice(text : String) : Slice(UInt32)
-      num_hashes, _, _, shingle_size, min_words = config
-
-      # Normalize to lowercase for case-insensitive matching
-      normalized = text.downcase.strip
-
-      # Return zeros for empty or too-short strings (backward compatibility)
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
-
-      # Return zeros if word count is below minimum
-      word_count = normalized.split(/\s+/).size
-      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
-
-      # Return zeros if text is shorter than shingle size
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      roller = ShingleRoller.new(shingle_size)
-
-      normalized.each_byte do |byte|
-        if h64 = roller.roll(byte)
-          update_signature(signature, h64)
-        end
-      end
-
-      signature
+      cfg = default_config
+      compute_signature_with_config(cfg, text)
     end
 
     private def self.update_signature(signature : Slice(UInt32), h64 : UInt64) : Nil
-      num_hashes, _, _, _ = config
-      a = @@a
-      b = @@b
-
+      # Use the runtime default configuration (thread-safe, from engine/config.cr)
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
         signature[i] = combined_h if combined_h < signature[i]
@@ -288,6 +149,8 @@ module LexisMinhash
     # Negative weights are clamped to 0 (excluded from signature).
     def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
       if weights
+        # Back-compat: use default_config for weighted path as well
+        cfg = default_config
         compute_signature_slice_weighted(text, weights).to_a
       else
         compute_signature(text)
@@ -309,9 +172,11 @@ module LexisMinhash
     end
 
     private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
-      num_hashes, _, _, _ = config
-      a = @@a
-      b = @@b
+      # Use runtime default config coefficients
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
 
       effective_weight = Math.max(weight, 0.0_f64)
       return if effective_weight <= 0.0_f64
@@ -341,7 +206,12 @@ module LexisMinhash
     # volume usage prefer `prehash_weights` + hashed-weight API to avoid
     # allocation overhead.
     def self.compute_signature_slice_weighted(text : String, weights : Hash(String, Float64)) : Slice(UInt32)
-      num_hashes, _, _, shingle_size, min_words = config
+      # Implement weighted signature using default_config to preserve
+      # runtime-configured coefficients if Engine.configure was used.
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      shingle_size = cfg.shingle_size
+      min_words = cfg.min_words
 
       normalized = text.downcase.strip
       return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
@@ -352,9 +222,11 @@ module LexisMinhash
       return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      roller = ShingleRoller.new(shingle_size)
-      def_weight = default_weight
+      def_weight = cfg.default_weight
 
+      # Use shingles_hashes but we need the shingle string to lookup weights.
+      # Fall back to ShingleRoller for the small allocation where string keys are used.
+      roller = ShingleRoller.new(shingle_size)
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           if shingle_str = roller.current_shingle
@@ -456,12 +328,13 @@ module LexisMinhash
     # callers to control the string-to-hash mapping (e.g., use xxHash or FNV)
     # and avoids duplicated hashing inside the engine.
     def self.compute_signature_from_hashes(hashes : Iterable(UInt64)) : Slice(UInt32)
-      num_hashes, _, _, _, _ = config
+      # Use default config coefficients to compute from pre-hashed values
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      a = @@a
-      b = @@b
-
       hashes.each do |h64|
         num_hashes.times do |i|
           combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
@@ -480,12 +353,12 @@ module LexisMinhash
     # The caller is responsible for aligning hashes and weights in the same
     # iteration order.
     def self.compute_signature_from_hashes(hashes : Iterable(UInt64), weights : Iterable(Float64)) : Slice(UInt32)
-      num_hashes, _, _, _, _ = config
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      a = @@a
-      b = @@b
-
       hashes.zip(weights).each do |h64, weight|
         effective_weight = Math.max(weight, 0.0_f64)
         next if effective_weight <= 0.0_f64
