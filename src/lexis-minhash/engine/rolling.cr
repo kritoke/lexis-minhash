@@ -41,7 +41,7 @@ module LexisMinhash
     # Generate rolling shingle hashes (UInt64) for a text and window size `k`.
     # Yields each rolling hash to the provided block without allocating shingle
     # strings. This is a pure helper (no module-level mutation).
-    def self.shingles_hashes(text : String, k : Int32)
+    def self.shingles_hashes(text : String, k : Int32, &block)
       p = 31_u64
       power = 1_u64
       (k - 1).times { power = power &* p }
@@ -56,7 +56,7 @@ module LexisMinhash
         buffer << byte
         current_hash = (current_hash &* p) &+ byte.to_u64
         if buffer.size >= k
-          yield current_hash
+          block.call(current_hash)
         end
       end
     end

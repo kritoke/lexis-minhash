@@ -31,10 +31,9 @@ module LexisMinhash
 
     # Compute signature from pre-hashed UInt64 IDs
     def self.compute_signature_from_hashes(hashes : Iterable(UInt64)) : Slice(UInt32)
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
+      num_hashes = default_config.signature_size
+      a = default_config.a
+      b = default_config.b
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       hashes.each do |h64|
@@ -49,10 +48,9 @@ module LexisMinhash
 
     # Compute weighted signature from pre-hashed UInt64 IDs with weights
     def self.compute_signature_from_hashes(hashes : Iterable(UInt64), weights : Iterable(Float64)) : Slice(UInt32)
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
+      num_hashes = default_config.signature_size
+      a = default_config.a
+      b = default_config.b
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       hashes.zip(weights).each do |h64, weight|

@@ -34,15 +34,15 @@ describe LexisMinhash::Engine do
       k = 5
       # collect from shingles_hashes
       hashes = [] of UInt64
-      LexisMinhash::Engine.shingles_hashes(text, k) do |h|
-        hashes << h
+      LexisMinhash::Engine.shingles_hashes(text, k) do |hash_val|
+        hashes << hash_val
       end
 
       # collect from ShingleRoller
       roller_hashes = [] of UInt64
       roller = LexisMinhash::ShingleRoller.new(k)
-      text.each_byte do |b|
-        if hh = roller.roll(b)
+      text.each_byte do |byte_val|
+        if hh = roller.roll(byte_val)
           roller_hashes << hh
         end
       end

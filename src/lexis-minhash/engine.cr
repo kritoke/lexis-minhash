@@ -106,22 +106,19 @@ module LexisMinhash
     # returns a `Slice(UInt32)` directly for performance-critical code.
     def self.compute_signature(text : String) : Array(UInt32)
       # Back-compat: use default config to compute signature via the pure API
-      cfg = default_config
-      compute_signature_with_config(cfg, text).to_a
+      compute_signature_with_config(default_config, text).to_a
     end
 
     # Compute signature as Slice(UInt32) for performance-critical code
     def self.compute_signature_slice(text : String) : Slice(UInt32)
-      cfg = default_config
-      compute_signature_with_config(cfg, text)
+      compute_signature_with_config(default_config, text)
     end
 
     private def self.update_signature(signature : Slice(UInt32), h64 : UInt64) : Nil
       # Use the runtime default configuration (thread-safe, from engine/config.cr)
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
+      num_hashes = default_config.signature_size
+      a = default_config.a
+      b = default_config.b
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
         signature[i] = combined_h if combined_h < signature[i]
@@ -150,7 +147,6 @@ module LexisMinhash
     def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
       if weights
         # Back-compat: use default_config for weighted path as well
-        cfg = default_config
         compute_signature_slice_weighted(text, weights).to_a
       else
         compute_signature(text)
@@ -173,10 +169,9 @@ module LexisMinhash
 
     private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
       # Use runtime default config coefficients
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
+      num_hashes = default_config.signature_size
+      a = default_config.a
+      b = default_config.b
 
       effective_weight = Math.max(weight, 0.0_f64)
       return if effective_weight <= 0.0_f64
