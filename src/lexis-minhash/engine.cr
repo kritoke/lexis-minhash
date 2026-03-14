@@ -84,12 +84,13 @@ module LexisMinhash
     # `default_config` and `configure` from there for deterministic setup.
 
     # Default configuration constants
-    SIGNATURE_SIZE =     100
-    NUM_BANDS      =      20
-    ROWS_PER_BAND  =       5
-    SHINGLE_SIZE   =       5
-    MIN_WORDS      =       4
-    DEFAULT_WEIGHT = 1.0_f64
+    SIGNATURE_SIZE   =     100
+    NUM_BANDS        =      20
+    ROWS_PER_BAND    =       5
+    SHINGLE_SIZE     =       5
+    MIN_WORDS        =       4
+    DEFAULT_WEIGHT   = 1.0_f64
+    MAX_SHINGLE_SIZE =      32
 
     # Initialization and mutable coefficient state are handled in engine/config.cr
 
@@ -205,34 +206,14 @@ module LexisMinhash
     end
 
     # Compute a weighted signature where weights are provided as a String->Float map
-    # The method allocates shingle Strings internally (one per shingle). For high
-    # volume usage prefer `prehash_weights` + hashed-weight API to avoid
-    # allocation overhead.
+    # This method now delegates to the optimized hashed-weight path by pre-hashing
+    # the weights map once, avoiding String allocations during shingle processing.
+    # For maximum performance when reusing weights, use prehash_weights() once and
+    # call compute_signature_slice_weighted_hashed() directly.
     def self.compute_signature_slice_weighted(text : String, weights : Hash(String, Float64)) : Slice(UInt32)
-      # Implement weighted signature using default_config to preserve
-      # runtime-configured coefficients if Engine.configure was used.
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      shingle_size = cfg.shingle_size
-      min_words = cfg.min_words
-
-      normalized = text.downcase.strip
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
-
-      word_count = normalized.split(/\s+/).size
-      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
-
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      def_weight = cfg.default_weight
-
-      shingles_with_strings(normalized, shingle_size) do |h64, shingle_str|
-        weight = weights[shingle_str]? || def_weight
-        update_signature_weighted(signature, h64, weight)
-      end
-
-      signature
+      # Pre-hash the weights map once to avoid repeated String allocations
+      hashed_weights = prehash_weights(weights)
+      compute_signature_slice_weighted_hashed(text, hashed_weights)
     end
 
     # Compute weighted signature where weights are keyed by the shingle's UInt64 rolling hash.
@@ -453,7 +434,7 @@ module LexisMinhash
       num_bands.times do |band_idx|
         band_slice = signature[band_idx * rows...(band_idx * rows + rows)]
         combined = 0_u64
-        band_slice.each { |_hash| combined = (combined << 7) ^ _hash }
+        band_slice.each { |_hash| combined = combine_hash(combined, _hash) }
         band_hashes << {band_idx, combined}
       end
 
@@ -471,7 +452,7 @@ module LexisMinhash
       num_bands.times do |band_idx|
         band_slice = signature[band_idx * rows, rows]
         combined = 0_u64
-        band_slice.each { |_hash| combined = (combined << 7) ^ _hash }
+        band_slice.each { |_hash| combined = combine_hash(combined, _hash) }
         band_hashes << {band_idx, combined}
       end
 
@@ -486,6 +467,15 @@ module LexisMinhash
       rows = cfg.rows_per_band
       s_r = similarity ** rows
       1.0_f64 - (1.0_f64 - s_r) ** bands
+    end
+
+    # Robust hash combination using splitmix64-style mixing
+    # Provides better avalanche properties and distribution than simple XOR
+    private def self.combine_hash(combined : UInt64, hash_value : UInt32) : UInt64
+      # Splitmix64-style mixing for better distribution
+      result = (combined ^ hash_value.to_u64) &* 0x9e3779b97f4a7c15_u64
+      result = (result ^ (result >> 32))
+      result
     end
 
     # Serialization helpers moved to engine/serialize.cr for clarity

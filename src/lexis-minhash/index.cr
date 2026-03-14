@@ -93,27 +93,31 @@ module LexisMinhash
   # signatures per document and a set of per-band hash tables (LinearBucketTable)
   # to quickly retrieve candidate document ids for a query.
   class LSHIndex
-    @signatures : Hash(Int32, Array(UInt32))
+    @signatures : Hash(Int32, Array(UInt32))?
     @tables : Array(LinearBucketTable)
     @bands : Int32
+    @store_signatures : Bool
 
     # @rows unused: configuration drives row count from Engine; remove to avoid confusion
 
     # Initialize with expected number of documents for capacity planning
     # Table capacity is ~2x expected docs per band for good load factor
     # Initialize index with `bands` and `expected_docs` for capacity planning.
-    def initialize(bands : Int32 = 20, expected_docs : Int32 = 1000)
-      @signatures = Hash(Int32, Array(UInt32)).new
+    # When `store_signatures` is false, signature storage is disabled to reduce memory usage,
+    # but query_with_scores() will raise NotImplementedError.
+    def initialize(bands : Int32 = 20, expected_docs : Int32 = 1000, store_signatures : Bool = true)
+      @signatures = store_signatures ? Hash(Int32, Array(UInt32)).new : nil
       # Each band gets a table with ~2x expected entries
       table_capacity = expected_docs * 2
       @tables = Array.new(bands) { LinearBucketTable.new(table_capacity) }
       @bands = bands
+      @store_signatures = store_signatures
     end
 
     # Compute signature for text and insert into all band tables
     def add(doc_id : Int32, text : String) : Nil
       signature = Engine.compute_signature(text)
-      @signatures[doc_id] = signature
+      @signatures.try(&.[]=(doc_id, signature)) if @store_signatures
 
       band_hashes = Engine.generate_bands(signature, @bands)
       band_hashes.each do |band_idx, band_hash|
@@ -123,7 +127,7 @@ module LexisMinhash
 
     # Add a document using a precomputed signature
     def add_with_signature(doc_id : Int32, signature : Array(UInt32)) : Nil
-      @signatures[doc_id] = signature.dup
+      @signatures.try(&.[]=(doc_id, signature.dup)) if @store_signatures
 
       band_hashes = Engine.generate_bands(signature, @bands)
       band_hashes.each do |band_idx, band_hash|
@@ -134,7 +138,7 @@ module LexisMinhash
     # Add a document using TF-IDF style weights
     def add_with_weights(doc_id : Int32, text : String, weights : Hash(String, Float64)) : Nil
       signature = Engine.compute_signature(text, weights)
-      @signatures[doc_id] = signature
+      @signatures.try(&.[]=(doc_id, signature)) if @store_signatures
 
       band_hashes = Engine.generate_bands(signature, @bands)
       band_hashes.each do |band_idx, band_hash|
@@ -182,10 +186,14 @@ module LexisMinhash
 
     # Query by signature and return scored results
     def query_with_scores_by_signature(signature : Array(UInt32)) : Array({Int32, Float64})
+      unless @store_signatures
+        raise NotImplementedError.new("query_with_scores requires signature storage to be enabled (initialize with store_signatures: true)")
+      end
+
       candidates = query_by_signature(signature)
 
       candidates.map do |doc_id|
-        other_sig = @signatures[doc_id]?
+        other_sig = @signatures.try(&.[]?(doc_id))
         score = other_sig ? Engine.similarity(signature, other_sig) : 0.0_f64
         {doc_id, score}
       end.sort_by! { |_doc, score| -score }
@@ -193,10 +201,14 @@ module LexisMinhash
 
     # Find all similar document pairs above `threshold` similarity
     def find_similar_pairs(threshold : Float64 = 0.75) : Set({Int32, Int32})
+      unless @store_signatures
+        raise NotImplementedError.new("find_similar_pairs requires signature storage to be enabled (initialize with store_signatures: true)")
+      end
+
       pairs = Set({Int32, Int32}).new
       checked = Set({Int32, Int32}).new
 
-      @signatures.each do |doc_id, signature|
+      @signatures.try &.each do |doc_id, signature|
         candidates = query_by_signature(signature)
 
         candidates.each do |other_id|
@@ -205,7 +217,7 @@ module LexisMinhash
           next if checked.includes?(pair_key)
           checked << pair_key
 
-          if other_sig = @signatures[other_id]?
+          if other_sig = @signatures.try(&.[]?(other_id))
             if Engine.similarity(signature, other_sig) >= threshold
               pairs << {doc_id, other_id}
             end
@@ -216,14 +228,14 @@ module LexisMinhash
       pairs
     end
 
-    # Retrieve stored signature by doc id (returns `nil` if not present)
+    # Retrieve stored signature by doc id (returns `nil` if not present or storage disabled)
     def get_signature(doc_id : Int32) : Array(UInt32)?
-      @signatures[doc_id]?
+      @signatures.try(&.[]?(doc_id))
     end
 
-    # Number of stored documents
+    # Number of stored documents (approximate count based on first band table)
     def size : Int32
-      @signatures.size
+      @store_signatures ? @signatures.try(&.size) || 0 : @tables.first.size
     end
 
     # Returns load factors for each band's table
@@ -234,7 +246,7 @@ module LexisMinhash
 
     # Clear the index and all tables
     def clear : Nil
-      @signatures.clear
+      @signatures.try(&.clear)
       @tables.each(&.clear)
     end
   end

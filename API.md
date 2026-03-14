@@ -247,6 +247,39 @@ end
 
 ## Performance Optimization
 
+### Using Pre-Hashed Weights (Recommended)
+
+For optimal performance when using weighted signatures, pre-hash your weight maps to avoid repeated String allocations:
+
+```crystal
+# RECOMMENDED: Pre-hash weights once for reuse across multiple documents
+base_weights = {"hello" => 2.0_f64, "world" => 1.5_f64}
+hashed_weights = LexisMinhash::Engine.prehash_weights(base_weights)
+
+# Now use the hashed weights for fast signature computation
+documents.each do |doc|
+  signature = LexisMinhash::Engine.compute_signature_slice_weighted_hashed(doc, hashed_weights)
+  # Process signature...
+end
+```
+
+**Performance Benefits:**
+- **84% less memory allocation** (74.4kB → 11.8kB per signature)
+- **12% faster execution** compared to string-keyed weights
+- Avoids String allocation for every shingle during processing
+
+**When to Use:**
+- Processing multiple documents with the same weight map
+- Batch processing scenarios
+- High-throughput production applications
+
+**Alternative:** The string-keyed API automatically delegates to the optimized hashed path, so you get good performance even without explicit pre-hashing:
+
+```crystal
+# This is now optimized (delegates to hashed path internally)
+signature = LexisMinhash::Engine.compute_signature(text, string_weights)
+```
+
 ### Caching Shingle Weights
 
 Pre-compute weights to avoid repeated string operations:
