@@ -28,8 +28,27 @@ module LexisMinhash
       end
     end
 
+    # Splitmix64 stateful random number generator
+    # Provides high-quality randomness for coefficient generation
+    private class SplitMix64
+      @state : UInt64
+
+      def initialize(seed : UInt64)
+        @state = seed
+      end
+
+      # Generate next random UInt64 using splitmix64 algorithm
+      def next : UInt64
+        @state = @state &+ 0x9e3779b97f4a7c15_u64
+        z = @state
+        z = (z ^ (z >> 30)) &* 0xbf58476d1ce4e5b9_u64
+        z = (z ^ (z >> 27)) &* 0x94d049bb133111eb_u64
+        z ^ (z >> 31)
+      end
+    end
+
     # Generate a Config instance. When `seed` is provided the coefficient
-    # arrays `a` and `b` are filled deterministically using a simple LCG so
+    # arrays `a` and `b` are filled deterministically using splitmix64 so
     # results are reproducible across runs. When `seed` is nil, uses
     # Random::Secure as before.
     def self.generate_config(
@@ -42,29 +61,26 @@ module LexisMinhash
     ) : Config
       rows = signature_size // num_bands
 
-      a_slice = if seed
-                  seed_u64 = seed.to_u64
-                  arr_a = Pointer(UInt64).malloc(signature_size)
-                  arr_b = Pointer(UInt64).malloc(signature_size)
-                  signature_size.times do |i|
-                    arr_a[i] = ((((seed_u64 &* 6364136223846793005_u64) &+ i.to_u64) &+ 1442695040888963407_u64) | 1_u64)
-                    arr_b[i] = (((seed_u64 &* 6364136223846793005_u64) &+ (i.to_u64 &* 0x9e3779b97f4a7c15_u64)) &+ 1442695040888963407_u64)
-                  end
-                  Slice.new(arr_a, signature_size)
-                else
-                  Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
-                end
+      if seed
+        # Use splitmix64 for deterministic, high-quality coefficient generation
+        rng = SplitMix64.new(seed.to_u64)
 
-      b_slice = if seed
-                  seed_u64 = seed.to_u64
-                  arr_b = Pointer(UInt64).malloc(signature_size)
-                  signature_size.times do |i|
-                    arr_b[i] = (((seed_u64 &* 6364136223846793005_u64) &+ (i.to_u64 &* 0x9e3779b97f4a7c15_u64)) &+ 1442695040888963407_u64)
-                  end
-                  Slice.new(arr_b, signature_size)
-                else
-                  Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
-                end
+        arr_a = Pointer(UInt64).malloc(signature_size)
+        arr_b = Pointer(UInt64).malloc(signature_size)
+
+        signature_size.times do |i|
+          # 'a' coefficients must be odd for mathematical correctness in multiply-shift hashing
+          arr_a[i] = rng.next | 1_u64
+          arr_b[i] = rng.next
+        end
+
+        a_slice = Slice.new(arr_a, signature_size)
+        b_slice = Slice.new(arr_b, signature_size)
+      else
+        # Use cryptographically secure random for non-deterministic configurations
+        a_slice = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) | 1 }
+        b_slice = Slice(UInt64).new(signature_size) { Random::Secure.rand(UInt64) }
+      end
 
       Config.new(signature_size, num_bands, rows, shingle_size, min_words, default_weight, a_slice, b_slice)
     end

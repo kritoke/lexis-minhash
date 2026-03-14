@@ -32,16 +32,16 @@
 
 ## 5. Splitmix64 Coefficient Generation
 
-- [ ] 5.1 Implement splitmix64 algorithm for coefficient generation
-- [ ] 5.2 Replace LCG implementation in generate_config with splitmix64
-- [ ] 5.3 Ensure a_slice coefficients remain odd numbers for mathematical correctness
-- [ ] 5.4 Add comprehensive tests for deterministic behavior and quality improvement
-- [ ] 5.5 Update documentation about improved randomness quality
+- [x] 5.1 Implement splitmix64 algorithm for coefficient generation
+- [x] 5.2 Replace LCG implementation in generate_config with splitmix64
+- [x] 5.3 Ensure a_slice coefficients remain odd numbers for mathematical correctness
+- [x] 5.4 Add comprehensive tests for deterministic behavior and quality improvement
+- [x] 5.5 Update documentation about improved randomness quality
 
 ## 6. Integration and Validation
 
-- [ ] 6.1 Run all existing tests to ensure backward compatibility
-- [ ] 6.2 Run performance benchmarks to measure improvements
-- [ ] 6.3 Update AGENTS.md with new build/test commands if needed
-- [ ] 6.4 Run ameba linter and fix any issues
-- [ ] 6.5 Create final integration test covering all optimizations together
+- [x] 6.1 Run all existing tests to ensure backward compatibility
+- [x] 6.2 Run performance benchmarks to measure improvements
+- [x] 6.3 Update AGENTS.md with new build/test commands if needed
+- [x] 6.4 Run ameba linter and fix any issues
+- [x] 6.5 Create final integration test covering all optimizations together
