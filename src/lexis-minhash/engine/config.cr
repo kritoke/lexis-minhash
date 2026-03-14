@@ -104,8 +104,8 @@ module LexisMinhash
           raise ArgumentError.new("signature_size must be divisible by num_bands")
         end
 
-        if shingle_size > Engine::MAX_SHINGLE_SIZE
-          raise ArgumentError.new("shingle_size must not exceed #{Engine::MAX_SHINGLE_SIZE}")
+        if shingle_size > MAX_SHINGLE_SIZE
+          raise ArgumentError.new("shingle_size must not exceed #{MAX_SHINGLE_SIZE}")
         end
 
         @@default_cfg = generate_config(signature_size, num_bands, shingle_size, min_words, default_weight, seed)

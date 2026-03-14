@@ -26,6 +26,44 @@ describe LexisMinhash::Engine do
       end
       different.should be_true
     end
+
+    it "produces odd a coefficients for mathematical correctness" do
+      c = LexisMinhash::Engine.generate_config(signature_size: 32, num_bands: 8, seed: 12345_i64)
+      c.a.each do |coef|
+        (coef & 1_u64).should eq(1_u64)
+      end
+    end
+  end
+
+  describe "shingle size validation" do
+    it "raises ArgumentError for shingle size exceeding MAX_SHINGLE_SIZE in ShingleRoller" do
+      expect_raises(ArgumentError) do
+        LexisMinhash::ShingleRoller.new(33)
+      end
+    end
+
+    it "raises ArgumentError for shingle size exceeding MAX_SHINGLE_SIZE in Engine.configure" do
+      expect_raises(ArgumentError) do
+        LexisMinhash::Engine.configure(shingle_size: 33)
+      end
+    end
+
+    it "raises ArgumentError for shingle size exceeding MAX_SHINGLE_SIZE in shingles_hashes" do
+      expect_raises(ArgumentError) do
+        LexisMinhash::Engine.shingles_hashes("test", 33) { }
+      end
+    end
+
+    it "raises ArgumentError for shingle size exceeding MAX_SHINGLE_SIZE in shingles_with_strings" do
+      expect_raises(ArgumentError) do
+        LexisMinhash::Engine.shingles_with_strings("test", 33) { |_, _| }
+      end
+    end
+
+    it "allows valid shingle sizes up to MAX_SHINGLE_SIZE" do
+      roller = LexisMinhash::ShingleRoller.new(32)
+      roller.window_size.should eq(32)
+    end
   end
 
   describe "shingles_hashes parity" do

@@ -257,6 +257,51 @@ describe LexisMinhash::LSHIndex do
     candidates = index.query_with_weights("The quick brown fox jumps", weights)
     candidates.should be_a(Set(Int32))
   end
+
+  describe "optional signature storage" do
+    it "works with store_signatures: false for candidate retrieval" do
+      index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100, store_signatures: false)
+
+      index.add(1, "The quick brown fox")
+      index.add(2, "The quick brown dog")
+
+      index.size.should eq(2)
+      candidates = index.query("The quick brown fox")
+      candidates.size.should be > 0
+      index.get_signature(1).should be_nil
+    end
+
+    it "raises NotImplementedError for query_with_scores when store_signatures: false" do
+      index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100, store_signatures: false)
+
+      index.add(1, "The quick brown fox")
+
+      sig = LexisMinhash::Engine.compute_signature("The quick brown fox")
+      expect_raises(NotImplementedError) do
+        index.query_with_scores_by_signature(sig)
+      end
+    end
+
+    it "raises NotImplementedError for find_similar_pairs when store_signatures: false" do
+      index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100, store_signatures: false)
+
+      index.add(1, "The quick brown fox")
+      index.add(2, "The quick brown dog")
+
+      expect_raises(NotImplementedError) do
+        index.find_similar_pairs
+      end
+    end
+
+    it "returns approximate size from band tables when store_signatures: false" do
+      index = LexisMinhash::LSHIndex.new(bands: 20, expected_docs: 100, store_signatures: false)
+
+      index.add(1, "The quick brown fox")
+      index.add(2, "The quick brown dog")
+
+      index.size.should eq(2)
+    end
+  end
 end
 
 describe LexisMinhash::Similarity do
