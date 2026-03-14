@@ -38,6 +38,26 @@ module LexisMinhash
       intersection / {sum_a, sum_b}.min
     end
 
+    # Computes the Jaccard similarity coefficient between two sets
+    #
+    # The Jaccard similarity measures similarity between two sets as
+    # |A ∩ B| / |A ∪ B|. Returns a value between 0.0 (no overlap) and 1.0 (identical sets).
+    #
+    # ```
+    # a = Set{1, 2, 3}
+    # b = Set{2, 3, 4}
+    # LexisMinhash::Similarity.jaccard(a, b) # => 0.5 (intersection: 2, union: 4)
+    # ```
+    def self.jaccard(a : Set(T), b : Set(T)) : Float64 forall T
+      return 0.0_f64 if a.empty? || b.empty?
+
+      intersection_size = a.count { |elem| b.includes?(elem) }
+      union_size = a.size + b.size - intersection_size
+
+      return 0.0_f64 if union_size == 0
+      intersection_size.to_f64 / union_size.to_f64
+    end
+
     # Optimized overlap coefficient using two-pointer scan for sorted Slices
     #
     # This is ~10x faster than standard Set intersection in Crystal.

@@ -304,9 +304,79 @@ describe LexisMinhash::Similarity do
       result.should eq(expected)
     end
   end
+
+  describe "jaccard" do
+    it "returns 0.0 for empty sets" do
+      a = Set(Int32).new
+      b = Set(Int32).new
+      LexisMinhash::Similarity.jaccard(a, b).should eq(0.0_f64)
+    end
+
+    it "returns 0.0 when one set is empty" do
+      a = Set{1, 2, 3}
+      b = Set(Int32).new
+      LexisMinhash::Similarity.jaccard(a, b).should eq(0.0_f64)
+      LexisMinhash::Similarity.jaccard(b, a).should eq(0.0_f64)
+    end
+
+    it "returns 1.0 for identical sets" do
+      a = Set{1, 2, 3}
+      b = Set{1, 2, 3}
+      LexisMinhash::Similarity.jaccard(a, b).should eq(1.0_f64)
+    end
+
+    it "returns correct value for partial overlap" do
+      a = Set{1, 2, 3}
+      b = Set{2, 3, 4}
+      result = LexisMinhash::Similarity.jaccard(a, b)
+      result.should eq(0.5_f64)
+    end
+
+    it "returns 0.0 for disjoint sets" do
+      a = Set{1, 2, 3}
+      b = Set{4, 5, 6}
+      LexisMinhash::Similarity.jaccard(a, b).should eq(0.0_f64)
+    end
+  end
 end
 
 describe LexisMinhash::Engine do
+  describe "jaccard_similarity" do
+    it "returns 1.0 for identical text" do
+      text = "The quick brown fox jumps"
+      LexisMinhash::Engine.jaccard_similarity(text, text).should eq(1.0_f64)
+    end
+
+    it "returns 0.0 for completely different text" do
+      text1 = "abcde fghij"
+      text2 = "12345 67890"
+      LexisMinhash::Engine.jaccard_similarity(text1, text2).should eq(0.0_f64)
+    end
+
+    it "returns value between 0.0 and 1.0 for partial overlap" do
+      text1 = "The quick brown fox"
+      text2 = "The quick brown dog"
+      result = LexisMinhash::Engine.jaccard_similarity(text1, text2)
+      result.should be > 0.0_f64
+      result.should be < 1.0_f64
+    end
+
+    it "returns 0.0 for empty text" do
+      LexisMinhash::Engine.jaccard_similarity("", "").should eq(0.0_f64)
+      LexisMinhash::Engine.jaccard_similarity("test", "").should eq(0.0_f64)
+      LexisMinhash::Engine.jaccard_similarity("", "test").should eq(0.0_f64)
+    end
+
+    it "supports Document interface" do
+      doc1 = LexisMinhash::SimpleDocument.new("Hello world")
+      doc2 = LexisMinhash::SimpleDocument.new("Hello world")
+      doc3 = LexisMinhash::SimpleDocument.new("Different text")
+
+      LexisMinhash::Engine.jaccard_similarity(doc1, doc2).should eq(1.0_f64)
+      LexisMinhash::Engine.jaccard_similarity(doc1, doc3).should be < 1.0_f64
+    end
+  end
+
   describe "compute_signature with weights" do
     it "returns signature of correct size with weights" do
       weights = Hash(String, Float64).new

@@ -14,6 +14,7 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 
 - **O(n) MinHash Signatures**: Rolling hash + multiply-shift, no intermediate string allocations
 - **Signature Similarity**: Fast approximate Jaccard similarity estimation
+- **True Jaccard Similarity**: Exact Jaccard similarity based on shingle sets for validation
 - **Weighted MinHash**: Optional TF-IDF weights for frequency-biased sampling
 - **Weighted Overlap Coefficient**: Similarity measure for weighted document representations
 - **Overlap Coefficient**: Measure set similarity using |A ∩ B| / min(|A|, |B|)
@@ -96,6 +97,34 @@ LexisMinhash::Engine.configure(seed: 12345)
 # Generate LSH bands for candidate detection
 bands = LexisMinhash::Engine.generate_bands(sig1)
 # bands is Array({Int32, UInt64}) with {band_index, band_hash} tuples
+```
+
+### Jaccard Similarity
+
+The library provides both approximate (MinHash-based) and exact Jaccard similarity:
+
+```crystal
+# Approximate Jaccard similarity using MinHash signatures (fast)
+sig1 = LexisMinhash::Engine.compute_signature("Document one text")
+sig2 = LexisMinhash::Engine.compute_signature("Document two text")
+approx_similarity = LexisMinhash::Engine.similarity(sig1, sig2)
+
+# Exact Jaccard similarity based on shingle sets (accurate, but slower)
+exact_similarity = LexisMinhash::Engine.jaccard_similarity("Document one text", "Document two text")
+
+# Generic Jaccard for any sets
+set_a = Set{1, 2, 3, 4}
+set_b = Set{2, 3, 4, 5}
+jaccard = LexisMinhash::Similarity.jaccard(set_a, set_b) # => 0.6 (3/5)
+
+# Use exact Jaccard to validate MinHash estimates
+puts "MinHash estimate: #{approx_similarity}"
+puts "Exact Jaccard: #{exact_similarity}"
+```
+
+**When to use which:**
+- **MinHash similarity**: Fast approximation, good for large datasets and filtering
+- **Exact Jaccard**: Accurate but requires building full shingle sets, use for validation or small datasets
 ```
 
 ### Overlap Coefficient
@@ -384,12 +413,22 @@ Or use the helper script (intended for CI) to run all examples:
 | `compute_signature(doc : Document)` | Generate from Document interface → `Array(UInt32)` |
 | `compute_signature_slice(text)` | Generate signature → `Slice(UInt32)` (faster) |
 | `similarity(sig1, sig2)` | Compare two signatures (0.0 to 1.0) |
+| `jaccard_similarity(text1, text2)` | Exact Jaccard similarity based on shingle sets |
+| `jaccard_similarity(doc1, doc2)` | Exact Jaccard similarity for Document interface |
 | `overlap_coefficient(a, b)` | Overlap coefficient: \|A ∩ B\| / min(\|A\|, \|B\|) |
 | `generate_bands(signature)` | Generate LSH bands → `Array({Int32, UInt64})` |
 | `detection_probability(similarity)` | Probability of detecting items at given similarity |
 | `signature_to_bytes(signature)` | Convert signature to bytes for storage |
 | `bytes_to_signature(bytes)` | Convert bytes → `Array(UInt32)` |
 | `bytes_to_signature_slice(bytes)` | Convert bytes → `Slice(UInt32)` (faster) |
+
+### Similarity Methods
+
+| Method | Description |
+|--------|-------------|
+| `weighted_overlap(a, b)` | Weighted overlap coefficient for hash maps |
+| `jaccard(set_a, set_b)` | Generic Jaccard similarity for any sets |
+| `fast_overlap(a, b)` | Fast overlap coefficient for sorted slices |
 
 ### LSHIndex Methods
 

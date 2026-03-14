@@ -99,6 +99,49 @@ LexisMinhash::Engine.configure(signature_size: 100, num_bands: 50)
 
 **Threshold Reference (100 hashes):**
 
+---
+
+## Validating MinHash Estimates with Exact Jaccard
+
+MinHash provides fast approximation of Jaccard similarity, but for validation or when you need exact values, use `jaccard_similarity`:
+
+### When to Use Exact Jaccard
+
+1. **Validation**: Verify MinHash estimates on a sample of document pairs
+2. **Small Datasets**: When you have few documents and can afford O(n) memory
+3. **Calibration**: Determine appropriate LSH thresholds for your data
+4. **Debugging**: Investigate why certain document pairs are/aren't being detected
+
+### Example: Calibration Workflow
+
+```crystal
+# Sample some document pairs
+samples = [
+  {"doc1", "doc2"},
+  {"doc1", "doc3"},
+  {"doc2", "doc3"},
+]
+
+samples.each do |text1, text2|
+  sig1 = LexisMinhash::Engine.compute_signature(text1)
+  sig2 = LexisMinhash::Engine.compute_signature(text2)
+  
+  minhash_sim = LexisMinhash::Engine.similarity(sig1, sig2)
+  exact_jaccard = LexisMinhash::Engine.jaccard_similarity(text1, text2)
+  
+  error = (minhash_sim - exact_jaccard).abs
+  puts "MinHash: #{minhash_sim.round(3)}, Exact: #{exact_jaccard.round(3)}, Error: #{error.round(3)}"
+end
+```
+
+### Performance Considerations
+
+- **MinHash similarity**: O(signature_size) comparison, no memory overhead
+- **Exact Jaccard**: O(n) to build shingle sets, O(|A| + |B|) to compute
+- For large documents, prefer MinHash for filtering, exact Jaccard only when needed
+
+---
+
 | Bands | Rows | Threshold | Best For |
 |-------|------|-----------|----------|
 | 20    | 5    | 0.55      | Standard Jaccard |

@@ -100,6 +100,14 @@ module LexisMinhash
     # Engine configuration is implemented in `engine/config.cr` and exported
     # from there (provides `Engine.configure`, `Engine.config`, and `Engine.default_weight`).
 
+    # Private helper to normalize and validate weights
+    # Returns nil if weight should be excluded (negative or zero)
+    private def self.normalize_weight(weight : Float64) : Float64?
+      effective = Math.max(weight, 0.0_f64)
+      return nil if effective <= 0.0_f64
+      effective
+    end
+
     # Compute signature using rolling hash + multiply-shift
     # Returns Array(UInt32) for backward compatibility
     # This API is convenient but slower than `compute_signature_slice` which
@@ -173,8 +181,8 @@ module LexisMinhash
       a = default_config.a
       b = default_config.b
 
-      effective_weight = Math.max(weight, 0.0_f64)
-      return if effective_weight <= 0.0_f64
+      effective_weight = normalize_weight(weight)
+      return if effective_weight.nil?
 
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
@@ -231,7 +239,10 @@ module LexisMinhash
     # This avoids allocating a String for every shingle and can significantly reduce
     # allocations when weights are provided. Recommended when reusing the same weights map.
     def self.compute_signature_slice_weighted_hashed(text : String, weights_hashed : Hash(UInt64, Float64)) : Slice(UInt32)
-      num_hashes, _, _, shingle_size, min_words = config
+      cfg = default_config
+      num_hashes = cfg.signature_size
+      shingle_size = cfg.shingle_size
+      min_words = cfg.min_words
 
       normalized = text.downcase.strip
       return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
@@ -243,7 +254,7 @@ module LexisMinhash
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       roller = ShingleRoller.new(shingle_size)
-      def_weight = default_weight
+      def_weight = cfg.default_weight
 
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
@@ -345,8 +356,8 @@ module LexisMinhash
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
       hashes.zip(weights).each do |h64, weight|
-        effective_weight = Math.max(weight, 0.0_f64)
-        next if effective_weight <= 0.0_f64
+        effective_weight = normalize_weight(weight)
+        next if effective_weight.nil?
 
         effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
 
@@ -374,58 +385,69 @@ module LexisMinhash
       matches.to_f64 / sig1.size.to_f64
     end
 
-    # Overlap coefficient for two sorted UInt64 slices
-    def self.overlap_coefficient(a : Slice(UInt64), b : Slice(UInt64)) : Float64
-      return 0.0 if a.empty? || b.empty?
+    # Extract shingle set from text as UInt64 hashes
+    # Uses rolling hash for O(n) performance without string allocations
+    private def self.extract_shingle_set(text : String) : Set(UInt64)
+      shingle_size = default_config.shingle_size
+      normalized = text.downcase.strip
+      shingles = Set(UInt64).new
 
-      intersection = 0
-      i = 0
-      j = 0
+      return shingles if normalized.empty?
+      return shingles if normalized.size < shingle_size
 
-      while i < a.size && j < b.size
-        if a[i] == b[j]
-          intersection += 1
-          i += 1
-          j += 1
-        elsif a[i] < b[j]
-          i += 1
-        else
-          j += 1
+      roller = ShingleRoller.new(shingle_size)
+      normalized.each_byte do |byte|
+        if h64 = roller.roll(byte)
+          shingles << h64
         end
       end
 
-      intersection.to_f / {a.size, b.size}.min
+      shingles
+    end
+
+    # Compute true Jaccard similarity between two texts based on shingle sets
+    #
+    # This computes the exact Jaccard similarity |A ∩ B| / |A ∪ B| where A and B
+    # are the sets of character n-grams (shingles) from each text. This is more
+    # accurate than MinHash-based similarity estimation but requires O(n) memory.
+    #
+    # ```
+    # text1 = "The quick brown fox"
+    # text2 = "The quick brown dog"
+    # similarity = LexisMinhash::Engine.jaccard_similarity(text1, text2)
+    # ```
+    def self.jaccard_similarity(text1 : String, text2 : String) : Float64
+      set1 = extract_shingle_set(text1)
+      set2 = extract_shingle_set(text2)
+      Similarity.jaccard(set1, set2)
+    end
+
+    # Compute true Jaccard similarity between two Documents
+    #
+    # Convenience overload for the Document interface pattern.
+    def self.jaccard_similarity(doc1 : LexisMinhash::Document, doc2 : LexisMinhash::Document) : Float64
+      jaccard_similarity(doc1.text, doc2.text)
+    end
+
+    # Overlap coefficient for two sorted UInt64 slices
+    # Delegates to Similarity.fast_overlap for DRY implementation
+    def self.overlap_coefficient(a : Slice(UInt64), b : Slice(UInt64)) : Float64
+      Similarity.fast_overlap(a, b)
     end
 
     # Overlap coefficient for two sorted UInt32 slices
+    # Delegates to Similarity.fast_overlap for DRY implementation
     def self.overlap_coefficient(a : Slice(UInt32), b : Slice(UInt32)) : Float64
-      return 0.0 if a.empty? || b.empty?
-
-      intersection = 0
-      i = 0
-      j = 0
-
-      while i < a.size && j < b.size
-        if a[i] == b[j]
-          intersection += 1
-          i += 1
-          j += 1
-        elsif a[i] < b[j]
-          i += 1
-        else
-          j += 1
-        end
-      end
-
-      intersection.to_f / {a.size, b.size}.min
+      Similarity.fast_overlap(a, b)
     end
 
     # Generate LSH bands from signature (Array or Slice)
     # Returns Array({Int32, UInt64}) with {band_index, band_hash} tuples
     # Optional `bands` parameter overrides Engine.config num_bands for custom LSH configurations
     def self.generate_bands(signature : Array(UInt32), bands : Int32? = nil) : Array({Int32, UInt64})
-      _, config_bands, rows, _ = config
-      num_bands = bands || config_bands
+      cfg = default_config
+      num_bands = bands || cfg.num_bands
+      rows = cfg.rows_per_band
       band_hashes = [] of {Int32, UInt64}
 
       num_bands.times do |band_idx|
@@ -441,8 +463,9 @@ module LexisMinhash
     # Generate band hashes from a signature slice (fast path)
     # Optional `bands` parameter overrides Engine.config num_bands for custom LSH configurations
     def self.generate_bands(signature : Slice(UInt32), bands : Int32? = nil) : Array({Int32, UInt64})
-      _, config_bands, rows, _ = config
-      num_bands = bands || config_bands
+      cfg = default_config
+      num_bands = bands || cfg.num_bands
+      rows = cfg.rows_per_band
       band_hashes = [] of {Int32, UInt64}
 
       num_bands.times do |band_idx|
@@ -458,7 +481,9 @@ module LexisMinhash
     # Estimate probability of detecting similar items
     # Based on s (similarity), b (bands), r (rows per band)
     def self.detection_probability(similarity : Float64) : Float64
-      _, bands, rows, _ = config
+      cfg = default_config
+      bands = cfg.num_bands
+      rows = cfg.rows_per_band
       s_r = similarity ** rows
       1.0_f64 - (1.0_f64 - s_r) ** bands
     end
