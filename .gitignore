@@ -64,3 +64,4 @@ flake.private.nix
 .opencode/
 
 todo.md
+openspec/
