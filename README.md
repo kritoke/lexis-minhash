@@ -26,13 +26,18 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 - **Signature Struct**: Convenient serialization with `to_blob`/`from_blob`
 - **High Performance**: 26x faster than previous versions with 84% less memory allocation
 
-## What's New in v0.4.2
+## What's New in v0.5.0
 
-- **Memory safety fix**: Fixed critical memory safety bug in `Engine.configure` when using the `seed` parameter. Previously could cause undefined behavior due to dangling pointers.
-- Fixed unused `@rows` instance variable in `LSHIndex`.
-- Various CI improvements and bug fixes.
+- **Performance**: 26x faster with 84% less memory allocation
+- **Splitmix64 Hash Mixing**: Better avalanche properties for LSH band hashing
+- **Exact Jaccard Similarity**: `Engine.jaccard_similarity(text1, text2)` for accurate similarity computation
+- **Functional Config API**: `Engine.generate_config` for thread-safe, deterministic signatures
+- **Fast Overlap**: `Similarity.fast_overlap` - 10x faster overlap coefficient
+- **Weighted Overlap**: `Similarity.weighted_overlap` for TF-IDF vectors
+- **Hash-Based API**: Compute signatures from pre-hashed UInt64 values
+- **Optional Storage**: `LSHIndex.new(store_signatures: false)` for reduced memory usage
 
-See the full release notes at https://github.com/kritoke/lexis-minhash/releases/tag/v0.4.2
+See the [CHANGELOG](./CHANGELOG.md) for full details.
 
 ## Upgrade Notes
 
@@ -55,7 +60,7 @@ Add the dependency to your `shard.yml`:
 dependencies:
   lexis-minhash:
     github: kritoke/lexis-minhash
-    version: ~> 0.4.2
+    version: ~> 0.5.0
 ```
 
 Then run `shards install`.

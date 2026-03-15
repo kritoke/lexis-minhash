@@ -65,3 +65,4 @@ flake.private.nix
 
 todo.md
 openspec/
+lexis-minhash
