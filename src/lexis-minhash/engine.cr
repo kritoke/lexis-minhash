@@ -1,24 +1,18 @@
 # Engine implementation and core types for LexisMinhash
 #
-# This file contains the main engine implementation: rolling shingling,
-# MinHash signature generation (weighted and unweighted), helpers for
-# prehashing weights, and serialization helpers. The `Signature` struct is a
-# convenient wrapper for signatures with to_blob/from_blob helpers.
+# Contains the main engine: MinHash signature generation (weighted and
+# unweighted), band generation for LSH, and similarity estimation.
+# Configuration is in engine/config.cr, rolling hash in engine/rolling.cr,
+# signature helpers in engine/signature.cr, serialization in engine/serialize.cr.
 require "./engine/config"
 require "./engine/rolling"
 require "./engine/signature"
 require "./engine/serialize"
 
 module LexisMinhash
-  # ShingleRoller and shingles_hashes are implemented in engine/rolling.cr
-
   # MinHash signature wrapper providing convenient serialization and similarity
   #
-  # Signature contains a `Slice(UInt32)` of minhash values and exposes helpers to
-  # serialize to a BLOB (`to_blob`) and deserialize back (`from_blob`). It also
-  # exposes `similarity` to compare two Signatures using the Engine implementation.
-  #
-  # Example
+  # Example:
   # ```
   # sig = LexisMinhash::Signature.compute("Document text")
   # bytes = sig.to_blob
@@ -28,9 +22,8 @@ module LexisMinhash
   struct Signature
     getter data : Slice(UInt32)
 
-    # Initialize a Signature wrapper from a pre-allocated `Slice(UInt32)`.
-    # This is a low-level constructor used by other helpers; prefer
-    # `Signature.compute` for common usage.
+    # Initialize from a pre-allocated Slice(UInt32).
+    # Prefer `Signature.compute` for common usage.
     def initialize(@data : Slice(UInt32))
     end
 
@@ -46,12 +39,10 @@ module LexisMinhash
 
     # Serialize signature to raw bytes suitable for storage (e.g., SQLite BLOB)
     def to_blob : Bytes
-      # Cast the UInt32 slice to a raw Byte slice for SQLite BLOBs
       @data.to_unsafe.as(UInt8*).to_slice(@data.size * sizeof(UInt32))
     end
 
-    # Deserialize a BLOB produced by `to_blob` back into a Signature. Returns an
-    # empty Signature for empty blobs and raises `ArgumentError` for malformed input.
+    # Deserialize a BLOB back into a Signature. Raises ArgumentError for malformed input.
     def self.from_blob(blob : Bytes) : Signature
       return Signature.new(Slice(UInt32).new(0)) if blob.empty?
 
@@ -61,12 +52,11 @@ module LexisMinhash
 
       count = blob.size // sizeof(UInt32)
       slice = Slice(UInt32).new(count)
-      # copy raw bytes into the UInt32 slice memory (copy as UInt8 pointer)
       blob.copy_to(slice.to_unsafe.as(UInt8*), blob.size)
       Signature.new(slice)
     end
 
-    # Compute similarity against another Signature using Engine.similarity
+    # Compute similarity against another Signature
     def similarity(other : Signature) : Float64
       Engine.similarity(@data, other.data)
     end
@@ -80,9 +70,6 @@ module LexisMinhash
   # MinHash engine using rolling hash + multiply-shift
   # O(n) shingling with no intermediate string allocations
   module Engine
-    # Runtime mutable engine state was moved to engine/config.cr. Use
-    # `default_config` and `configure` from there for deterministic setup.
-
     # Default configuration constants
     SIGNATURE_SIZE   =     100
     NUM_BANDS        =      20
@@ -92,111 +79,92 @@ module LexisMinhash
     DEFAULT_WEIGHT   = 1.0_f64
     MAX_SHINGLE_SIZE =      32
 
-    # Initialization and mutable coefficient state are handled in engine/config.cr
+    # --- Private helpers to eliminate DRY violations ---
 
-    # Config struct is provided in engine/config.cr (functional refactor)
-
-    # Rolling shingle helper is provided by engine/rolling.cr
-
-    # Engine configuration is implemented in `engine/config.cr` and exported
-    # from there (provides `Engine.configure`, `Engine.config`, and `Engine.default_weight`).
-
-    # Private helper to normalize and validate weights
-    # Returns nil if weight should be excluded (negative or zero)
-    private def self.normalize_weight(weight : Float64) : Float64?
-      effective = Math.max(weight, 0.0_f64)
-      return nil if effective <= 0.0_f64
-      effective
+    # Normalize text and validate against config requirements.
+    # Returns the normalized text, or nil if it doesn't meet minimum criteria.
+    private def self.prepare_text(text : String, cfg : Config) : String?
+      normalized = text.downcase.strip
+      return nil if normalized.empty?
+      word_count = normalized.split(/\s+/).size
+      return nil if word_count < cfg.min_words
+      return nil if normalized.size < cfg.shingle_size
+      normalized
     end
 
-    # Compute signature using rolling hash + multiply-shift
-    # Returns Array(UInt32) for backward compatibility
-    # This API is convenient but slower than `compute_signature_slice` which
-    # returns a `Slice(UInt32)` directly for performance-critical code.
-    def self.compute_signature(text : String) : Array(UInt32)
-      # Back-compat: use default config to compute signature via the pure API
-      compute_signature_with_config(default_config, text).to_a
-    end
-
-    # Compute signature as Slice(UInt32) for performance-critical code
-    def self.compute_signature_slice(text : String) : Slice(UInt32)
-      compute_signature_with_config(default_config, text)
-    end
-
-    private def self.update_signature(signature : Slice(UInt32), h64 : UInt64) : Nil
-      # Use the runtime default configuration (thread-safe, from engine/config.cr)
-      num_hashes = default_config.signature_size
-      a = default_config.a
-      b = default_config.b
+    # Apply a single shingle hash to the signature using multiply-shift.
+    # Updates signature[i] = min(signature[i], hash(a[i], b[i], h64)).
+    private def self.apply_hash_min(signature : Slice(UInt32), h64 : UInt64, cfg : Config) : Nil
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
         signature[i] = combined_h if combined_h < signature[i]
       end
     end
 
-    # Computes a MinHash signature with optional TF-IDF weights
-    #
-    # If weights are provided, uses weighted MinHash where higher weights
-    # (rare terms) have more influence on the signature.
-    #
-    # ```
-    # weights = {"hello" => 2.0_f64, "world" => 1.5_f64}
-    # sig = LexisMinhash::Engine.compute_signature("Hello World", weights)
-    # ```
-    #
-    # **Hash Key Matching**: Keys in the weights hash must match the shingles
-    # generated from the text. The library uses character n-grams (default: 5 chars)
-    # after converting text to lowercase. For example, "hello world" with shingle_size=5
-    # generates shingles: "hello", "ello ", "llo w", "lo wo", "o wor", " worl", "world"
-    #
-    # Unknown shingles use the configured default weight (default: 1.0).
-    # Set via `Engine.configure(default_weight: value)`.
-    #
-    # Negative weights are clamped to 0 (excluded from signature).
-    def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
-      if weights
-        # Back-compat: use default_config for weighted path as well
-        compute_signature_slice_weighted(text, weights).to_a
-      else
-        compute_signature(text)
-      end
-    end
-
-    # Computes a weighted MinHash signature
-    #
-    # Higher weights make terms more influential by dividing their hash values.
-    # This causes rare (high-weight) terms to produce smaller values that are
-    # more likely to "win" the minimum hash position.
-    def self.compute_signature_weighted(text : String, weights : Hash(String, Float64)) : Array(UInt32)
-      compute_signature_slice_weighted(text, weights).to_a
-    end
-
-    # Compute weighted signature using hashed shingle keys to avoid building Strings per shingle
-    def self.compute_signature(text : String, weights : Hash(UInt64, Float64)) : Array(UInt32)
-      compute_signature_slice_weighted_hashed(text, weights).to_a
-    end
-
-    private def self.update_signature_weighted(signature : Slice(UInt32), h64 : UInt64, weight : Float64) : Nil
-      # Use runtime default config coefficients
-      num_hashes = default_config.signature_size
-      a = default_config.a
-      b = default_config.b
-
+    # Apply a weighted shingle hash to the signature.
+    # Higher weights cause the hash to be divided, making it more likely to "win" the min.
+    private def self.apply_weighted_hash_min(signature : Slice(UInt32), h64 : UInt64, weight : Float64, cfg : Config) : Nil
       effective_weight = normalize_weight(weight)
       return if effective_weight.nil?
 
+      effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
+      num_hashes = cfg.signature_size
+      a = cfg.a
+      b = cfg.b
+
       num_hashes.times do |i|
         combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
-        effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
         weighted_value = combined_h.to_f64 / effective_value
         weighted_h = (weighted_value % Float64.new(UInt32::MAX)).to_u32
         signature[i] = weighted_h if weighted_h < signature[i]
       end
     end
 
-    # Compute signature slice (fast path) with optional String->Float64 weights.
-    # Prefer this API for performance-sensitive code because it avoids Array
-    # allocations and returns a Slice(UInt32) directly.
+    # Clamp weight to non-negative; returns nil if weight should be excluded.
+    private def self.normalize_weight(weight : Float64) : Float64?
+      effective = Math.max(weight, 0.0_f64)
+      return nil if effective <= 0.0_f64
+      effective
+    end
+
+    # --- Public signature computation API ---
+
+    # Compute signature using rolling hash + multiply-shift.
+    # Returns Array(UInt32) for backward compatibility.
+    def self.compute_signature(text : String) : Array(UInt32)
+      compute_signature_with_config(default_config, text).to_a
+    end
+
+    # Compute signature as Slice(UInt32) for performance-critical code.
+    def self.compute_signature_slice(text : String) : Slice(UInt32)
+      compute_signature_with_config(default_config, text)
+    end
+
+    # Computes a MinHash signature with optional TF-IDF weights.
+    # Unknown shingles use the configured default weight (default: 1.0).
+    # Negative weights are clamped to 0 (excluded from signature).
+    def self.compute_signature(text : String, weights : Hash(String, Float64)?) : Array(UInt32)
+      if weights
+        compute_signature_slice_weighted(text, weights).to_a
+      else
+        compute_signature(text)
+      end
+    end
+
+    # Computes a weighted MinHash signature from String-keyed weights.
+    def self.compute_signature_weighted(text : String, weights : Hash(String, Float64)) : Array(UInt32)
+      compute_signature_slice_weighted(text, weights).to_a
+    end
+
+    # Compute weighted signature using hashed shingle keys (UInt64).
+    def self.compute_signature(text : String, weights : Hash(UInt64, Float64)) : Array(UInt32)
+      compute_signature_slice_weighted_hashed(text, weights).to_a
+    end
+
+    # Compute signature slice with optional String->Float64 weights.
     def self.compute_signature_slice(text : String, weights : Hash(String, Float64)?) : Slice(UInt32)
       if weights
         compute_signature_slice_weighted(text, weights)
@@ -205,54 +173,61 @@ module LexisMinhash
       end
     end
 
-    # Compute a weighted signature where weights are provided as a String->Float map
-    # This method now delegates to the optimized hashed-weight path by pre-hashing
-    # the weights map once, avoiding String allocations during shingle processing.
-    # For maximum performance when reusing weights, use prehash_weights() once and
-    # call compute_signature_slice_weighted_hashed() directly.
+    # Compute a weighted signature from String-keyed weights.
+    # Pre-hashes the weights map once to avoid repeated String allocations.
     def self.compute_signature_slice_weighted(text : String, weights : Hash(String, Float64)) : Slice(UInt32)
-      # Pre-hash the weights map once to avoid repeated String allocations
       hashed_weights = prehash_weights(weights)
       compute_signature_slice_weighted_hashed(text, hashed_weights)
     end
 
     # Compute weighted signature where weights are keyed by the shingle's UInt64 rolling hash.
-    # This avoids allocating a String for every shingle and can significantly reduce
-    # allocations when weights are provided. Recommended when reusing the same weights map.
     def self.compute_signature_slice_weighted_hashed(text : String, weights_hashed : Hash(UInt64, Float64)) : Slice(UInt32)
       cfg = default_config
       num_hashes = cfg.signature_size
-      shingle_size = cfg.shingle_size
-      min_words = cfg.min_words
 
-      normalized = text.downcase.strip
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.empty?
-
-      word_count = normalized.split(/\s+/).size
-      return Slice(UInt32).new(num_hashes, 0_u32) if word_count < min_words
-
-      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.size < shingle_size
+      normalized = prepare_text(text, cfg)
+      return Slice(UInt32).new(num_hashes, 0_u32) if normalized.nil?
 
       signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      roller = ShingleRoller.new(shingle_size)
       def_weight = cfg.default_weight
 
+      roller = ShingleRoller.new(cfg.shingle_size)
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           weight = weights_hashed[h64]? || def_weight
-          update_signature_weighted(signature, h64, weight)
+          apply_weighted_hash_min(signature, h64, weight, cfg)
         end
       end
 
       signature
     end
 
-    # Helper to compute the rolling shingle hash for a given shingle string.
-    # This is useful for converting a weights Hash(String, Float64) into
-    # a Hash(UInt64, Float64) once, then using the hashed version for many
-    # documents to avoid repeated string allocations.
-    # Compute the rolling UInt64 hash for a given shingle String. Useful to
-    # convert a String-keyed weights map into a hashed map with `prehash_weights`.
+    # --- Hash-based signature API (decoupled from text processing) ---
+
+    # Compute signature directly from pre-hashed UInt64 values.
+    # The application handles String → UInt64 conversion.
+    def self.compute_signature_from_hashes(hashes : Iterable(UInt64)) : Slice(UInt32)
+      cfg = default_config
+      signature = Slice(UInt32).new(cfg.signature_size, UInt32::MAX)
+      hashes.each do |h64|
+        apply_hash_min(signature, h64, cfg)
+      end
+      signature
+    end
+
+    # Compute weighted signature from parallel iterables of hashes and weights.
+    def self.compute_signature_from_hashes(hashes : Iterable(UInt64), weights : Iterable(Float64)) : Slice(UInt32)
+      cfg = default_config
+      signature = Slice(UInt32).new(cfg.signature_size, UInt32::MAX)
+      hashes.zip(weights).each do |h64, weight|
+        apply_weighted_hash_min(signature, h64, weight, cfg)
+      end
+      signature
+    end
+
+    # --- Weight prehashing helpers ---
+
+    # Compute the rolling UInt64 hash for a given shingle String.
     def self.shingle_hash_for(shingle : String) : UInt64
       roller = ShingleRoller.new(shingle.size)
       h = 0_u64
@@ -264,94 +239,22 @@ module LexisMinhash
       h
     end
 
-    # Convert a Hash(String, Float64) of shingle -> weight into a Hash(UInt64, Float64)
-    # keyed by the shingle rolling hash. This should be called once for a weights map
-    # that will be reused across many documents to avoid repeated shingle string
-    # allocations during signature computation.
-    # Convert a Hash(String, Float64) into a Hash(UInt64, Float64) where keys
-    # are the rolling shingle hash. Call once for a weights map that will be
-    # reused across many documents.
+    # Convert String-keyed weights into UInt64-keyed weights using rolling shingle hash.
     def self.prehash_weights(weights : Hash(String, Float64)) : Hash(UInt64, Float64)
       hashed = Hash(UInt64, Float64).new
       weights.each do |shingle, weight|
-        h = shingle_hash_for(shingle)
-        hashed[h] = weight
+        hashed[shingle_hash_for(shingle)] = weight
       end
       hashed
     end
 
-    # Convenience: take a Hash(String, Float64), prehash it once, and compute signature.
-    # Useful when callers prefer the string-keyed API but still want the allocation
-    # improvements of the hashed-weight path.
-    # Convenience helper: prehash the supplied String-keyed weights and compute
-    # the signature using the hashed-weighted path.
+    # Convenience: prehash String-keyed weights and compute signature.
     def self.compute_signature_with_prehashed_weights(text : String, weights : Hash(String, Float64)) : Array(UInt32)
       hashed = prehash_weights(weights)
       compute_signature_slice_weighted_hashed(text, hashed).to_a
     end
 
-    # Compute signature from pre-hashed UInt64 IDs
-    #
-    # This decouples hashing from the engine - the application handles
-    # String -> UInt64 conversion (e.g., using xxHash, FNV, or custom hashing).
-    # The engine operates purely on UInt64 hash values.
-    #
-    # ```
-    # # App handles its own hashing
-    # hashes = ["hello", "world", "test"].map { |s| my_hash_function(s) }
-    # sig = LexisMinhash::Engine.compute_signature_from_hashes(hashes)
-    # ```
-    # Compute signature directly from an iterable of UInt64 hashes. This allows
-    # callers to control the string-to-hash mapping (e.g., use xxHash or FNV)
-    # and avoids duplicated hashing inside the engine.
-    def self.compute_signature_from_hashes(hashes : Iterable(UInt64)) : Slice(UInt32)
-      # Use default config coefficients to compute from pre-hashed values
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      hashes.each do |h64|
-        num_hashes.times do |i|
-          combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
-          signature[i] = combined_h if combined_h < signature[i]
-        end
-      end
-
-      signature
-    end
-
-    # Compute weighted signature from pre-hashed UInt64 IDs with weights
-    #
-    # Weights should be parallel to hashes or looked up by the caller.
-    # Higher weights bias toward those hashes "winning" the min position.
-    # Compute weighted signature from parallel iterables of hashes and weights.
-    # The caller is responsible for aligning hashes and weights in the same
-    # iteration order.
-    def self.compute_signature_from_hashes(hashes : Iterable(UInt64), weights : Iterable(Float64)) : Slice(UInt32)
-      cfg = default_config
-      num_hashes = cfg.signature_size
-      a = cfg.a
-      b = cfg.b
-
-      signature = Slice(UInt32).new(num_hashes, UInt32::MAX)
-      hashes.zip(weights).each do |h64, weight|
-        effective_weight = normalize_weight(weight)
-        next if effective_weight.nil?
-
-        effective_value = effective_weight < 1.0_f64 ? Math.log(1.0_f64 + effective_weight) : effective_weight
-
-        num_hashes.times do |i|
-          combined_h = ((a[i] &* h64 &+ b[i]) >> 32).to_u32
-          weighted_value = combined_h.to_f64 / effective_value
-          weighted_h = (weighted_value % Float64.new(UInt32::MAX)).to_u32
-          signature[i] = weighted_h if weighted_h < signature[i]
-        end
-      end
-
-      signature
-    end
+    # --- Similarity and comparison ---
 
     # Compute similarity between two signatures (Array or Slice)
     def self.similarity(sig1 : Array(UInt32) | Slice(UInt32), sig2 : Array(UInt32) | Slice(UInt32)) : Float64
@@ -366,17 +269,16 @@ module LexisMinhash
       matches.to_f64 / sig1.size.to_f64
     end
 
-    # Extract shingle set from text as UInt64 hashes
-    # Uses rolling hash for O(n) performance without string allocations
+    # Extract shingle set from text as UInt64 hashes using rolling hash.
     private def self.extract_shingle_set(text : String) : Set(UInt64)
-      shingle_size = default_config.shingle_size
-      normalized = text.downcase.strip
+      cfg = default_config
       shingles = Set(UInt64).new
 
+      normalized = text.downcase.strip
       return shingles if normalized.empty?
-      return shingles if normalized.size < shingle_size
+      return shingles if normalized.size < cfg.shingle_size
 
-      roller = ShingleRoller.new(shingle_size)
+      roller = ShingleRoller.new(cfg.shingle_size)
       normalized.each_byte do |byte|
         if h64 = roller.roll(byte)
           shingles << h64
@@ -386,81 +288,50 @@ module LexisMinhash
       shingles
     end
 
-    # Compute true Jaccard similarity between two texts based on shingle sets
-    #
-    # This computes the exact Jaccard similarity |A ∩ B| / |A ∪ B| where A and B
-    # are the sets of character n-grams (shingles) from each text. This is more
-    # accurate than MinHash-based similarity estimation but requires O(n) memory.
-    #
-    # ```
-    # text1 = "The quick brown fox"
-    # text2 = "The quick brown dog"
-    # similarity = LexisMinhash::Engine.jaccard_similarity(text1, text2)
-    # ```
+    # Compute true Jaccard similarity between two texts based on shingle sets.
     def self.jaccard_similarity(text1 : String, text2 : String) : Float64
       set1 = extract_shingle_set(text1)
       set2 = extract_shingle_set(text2)
       Similarity.jaccard(set1, set2)
     end
 
-    # Compute true Jaccard similarity between two Documents
-    #
-    # Convenience overload for the Document interface pattern.
+    # Compute true Jaccard similarity between two Documents.
     def self.jaccard_similarity(doc1 : LexisMinhash::Document, doc2 : LexisMinhash::Document) : Float64
       jaccard_similarity(doc1.text, doc2.text)
     end
 
-    # Overlap coefficient for two sorted UInt64 slices
-    # Delegates to Similarity.fast_overlap for DRY implementation
+    # Overlap coefficient for two sorted UInt64 slices.
     def self.overlap_coefficient(a : Slice(UInt64), b : Slice(UInt64)) : Float64
       Similarity.fast_overlap(a, b)
     end
 
-    # Overlap coefficient for two sorted UInt32 slices
-    # Delegates to Similarity.fast_overlap for DRY implementation
+    # Overlap coefficient for two sorted UInt32 slices.
     def self.overlap_coefficient(a : Slice(UInt32), b : Slice(UInt32)) : Float64
       Similarity.fast_overlap(a, b)
     end
 
-    # Generate LSH bands from signature (Array or Slice)
-    # Returns Array({Int32, UInt64}) with {band_index, band_hash} tuples
-    # Optional `bands` parameter overrides Engine.config num_bands for custom LSH configurations
-    def self.generate_bands(signature : Array(UInt32), bands : Int32? = nil) : Array({Int32, UInt64})
+    # --- LSH banding ---
+
+    # Generate LSH bands from a signature (Array or Slice).
+    # Returns Array({Int32, UInt64}) with {band_index, band_hash} tuples.
+    def self.generate_bands(signature : Array(UInt32) | Slice(UInt32), bands : Int32? = nil) : Array({Int32, UInt64})
       cfg = default_config
       num_bands = bands || cfg.num_bands
       rows = cfg.rows_per_band
       band_hashes = [] of {Int32, UInt64}
 
       num_bands.times do |band_idx|
-        band_slice = signature[band_idx * rows...(band_idx * rows + rows)]
         combined = 0_u64
-        band_slice.each { |_hash| combined = combine_hash(combined, _hash) }
+        rows.times do |j|
+          combined = combine_hash(combined, signature[band_idx * rows + j])
+        end
         band_hashes << {band_idx, combined}
       end
 
       band_hashes
     end
 
-    # Generate band hashes from a signature slice (fast path)
-    # Optional `bands` parameter overrides Engine.config num_bands for custom LSH configurations
-    def self.generate_bands(signature : Slice(UInt32), bands : Int32? = nil) : Array({Int32, UInt64})
-      cfg = default_config
-      num_bands = bands || cfg.num_bands
-      rows = cfg.rows_per_band
-      band_hashes = [] of {Int32, UInt64}
-
-      num_bands.times do |band_idx|
-        band_slice = signature[band_idx * rows, rows]
-        combined = 0_u64
-        band_slice.each { |_hash| combined = combine_hash(combined, _hash) }
-        band_hashes << {band_idx, combined}
-      end
-
-      band_hashes
-    end
-
-    # Estimate probability of detecting similar items
-    # Based on s (similarity), b (bands), r (rows per band)
+    # Estimate probability of detecting similar items.
     def self.detection_probability(similarity : Float64) : Float64
       cfg = default_config
       bands = cfg.num_bands
@@ -469,15 +340,11 @@ module LexisMinhash
       1.0_f64 - (1.0_f64 - s_r) ** bands
     end
 
-    # Robust hash combination using splitmix64-style mixing
-    # Provides better avalanche properties and distribution than simple XOR
+    # Robust hash combination using splitmix64-style mixing.
     private def self.combine_hash(combined : UInt64, hash_value : UInt32) : UInt64
-      # Splitmix64-style mixing for better distribution
       result = (combined ^ hash_value.to_u64) &* 0x9e3779b97f4a7c15_u64
       result = (result ^ (result >> 32))
       result
     end
-
-    # Serialization helpers moved to engine/serialize.cr for clarity
   end
 end

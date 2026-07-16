@@ -209,19 +209,18 @@ module LexisMinhash
       checked = Set({Int32, Int32}).new
 
       @signatures.try &.each do |doc_id, signature|
-        candidates = query_by_signature(signature)
-
-        candidates.each do |other_id|
+        query_by_signature(signature).each do |other_id|
           next if doc_id == other_id
+
           pair_key = doc_id < other_id ? {doc_id, other_id} : {other_id, doc_id}
           next if checked.includes?(pair_key)
           checked << pair_key
 
-          if other_sig = @signatures.try(&.[]?(other_id))
-            if Engine.similarity(signature, other_sig) >= threshold
-              pairs << {doc_id, other_id}
-            end
-          end
+          other_sig = @signatures.try(&.[]?(other_id))
+          next unless other_sig
+          next unless Engine.similarity(signature, other_sig) >= threshold
+
+          pairs << {doc_id, other_id}
         end
       end
 
