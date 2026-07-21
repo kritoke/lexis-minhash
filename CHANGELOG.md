@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-# [0.5.0] - Unreleased
+# [0.5.1] - 2026-01-26
+
+## Changed
+
+- **Crystal 1.19.1**: Upgraded from Crystal 1.18.2 to 1.19.1
+- **Internal Refactoring**: Simplified engine, rolling hash, serialization, and signature modules (net -184 lines)
+- **Nix Flake**: Removed bundled `shards` from toolbox (now included in Crystal 1.19.1 tarball), added `pcre` dependency, fixed PATH precedence for custom Crystal
+
+## Removed
+
+- Compiled binary no longer tracked in git
+
+---
+
+# [0.5.0] - 2026-01-26
 
 ## Added
 

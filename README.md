@@ -26,6 +26,12 @@ For advanced usage patterns and client-side recommendations, see [API.md](./API.
 - **Signature Struct**: Convenient serialization with `to_blob`/`from_blob`
 - **High Performance**: 26x faster than previous versions with 84% less memory allocation
 
+## What's New in v0.5.1
+
+- **Crystal 1.19.1**: Upgraded from Crystal 1.18.2 to 1.19.1
+- **Internal Refactoring**: Simplified engine, rolling hash, serialization, and signature modules
+- See the [CHANGELOG](./CHANGELOG.md) for full details.
+
 ## What's New in v0.5.0
 
 - **Performance**: 26x faster with 84% less memory allocation
@@ -51,7 +57,6 @@ sig = LexisMinhash::Engine.compute_signature(text, hashed)
 
 This repo also includes `examples/prehash_example.cr` demonstrating the pattern.
 
-
 ## Installation
 
 Add the dependency to your `shard.yml`:
@@ -60,7 +65,7 @@ Add the dependency to your `shard.yml`:
 dependencies:
   lexis-minhash:
     github: kritoke/lexis-minhash
-    version: ~> 0.5.0
+    version: ~> 0.5.1
 ```
 
 Then run `shards install`.
@@ -129,8 +134,10 @@ puts "Exact Jaccard: #{exact_similarity}"
 ```
 
 **When to use which:**
+
 - **MinHash similarity**: Fast approximation, good for large datasets and filtering
 - **Exact Jaccard**: Accurate but requires building full shingle sets, use for validation or small datasets
+
 ```
 
 ### Overlap Coefficient
@@ -237,6 +244,7 @@ LexisMinhash::Engine.configure(
 ```
 
 Default values:
+
 - `signature_size`: 100
 - `num_bands`: 20
 - `rows_per_band`: 5 (calculated as signature_size / num_bands)
@@ -277,6 +285,7 @@ sig = LexisMinhash::Engine.compute_signature_with_config(cfg, "Your text here")
 ```
 
 Benefits of `Engine::Config`:
+
 - **Deterministic**: Pass a `seed` for reproducible signatures across runs
 - **Thread-safe**: No global state; each thread can use its own config
 - **Testable**: Easy to create known configurations for tests
@@ -377,6 +386,7 @@ Engine.similarity(sig1, sig2).should be > 0.3  # May fail due to randomization
 ### Weighted LSH Queries
 
 When using weighted MinHash with LSHIndex, note that:
+
 - Documents added with `add_with_weights` produce different signatures than `add`
 - Query with the same weights to find matches: use `query_with_weights` for weighted-added documents
 - Mixing weighted and unweighted adds/queries may not find matches
@@ -406,8 +416,6 @@ Or use the helper script (intended for CI) to run all examples:
 ```bash
 ./scripts/run_examples.sh
 ```
-
-
 
 ## API Reference
 
@@ -473,7 +481,7 @@ docker-test:
   name: Test in Crystal Docker image
   runs-on: ubuntu-latest
   container:
-    image: 84codes/crystal:1.18.2-ubuntu-22.04
+    image: 84codes/crystal:1.19.1-ubuntu-22.04
   steps:
     - uses: actions/checkout@v4
     - name: Install system dependencies
